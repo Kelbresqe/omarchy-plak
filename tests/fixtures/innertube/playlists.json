@@ -1,0 +1,5 @@
+{"contents":{"singleColumnBrowseResultsRenderer":{"tabs":[{"tabRenderer":{"content":{"sectionListRenderer":{"contents":[{"gridRenderer":{"items":[
+ {"musicTwoRowItemRenderer":{"title":{"runs":[{"text":"New playlist"}]},"navigationEndpoint":{"createPlaylistEndpoint":{}}}},
+ {"musicTwoRowItemRenderer":{"thumbnailRenderer":{"musicThumbnailRenderer":{"thumbnail":{"thumbnails":[{"url":"https://i.ytimg.com/a.jpg","width":60,"height":60},{"url":"https://i.ytimg.com/b.jpg","width":226,"height":226},{"url":"https://i.ytimg.com/c.jpg","width":544,"height":544}]}}},"title":{"runs":[{"text":"Liked Music","navigationEndpoint":{"browseEndpoint":{"browseId":"VLLM"}}}]},"subtitle":{"runs":[{"text":"Auto playlist"}]}}},
+ {"musicTwoRowItemRenderer":{"thumbnailRenderer":{"musicThumbnailRenderer":{"thumbnail":{"thumbnails":[{"url":"https://i.ytimg.com/d.jpg","width":226,"height":226}]}}},"title":{"runs":[{"text":"Road Trip","navigationEndpoint":{"browseEndpoint":{"browseId":"VLPLrAXtmErZgOeiKm4sgNOknGvNjby9efdf"}}}]},"subtitle":{"runs":[{"text":"Playlist"},{"text":" • "},{"text":"Sam"},{"text":" • "},{"text":"1,204 songs"}]}}}
+]}}]}}}}]}}}

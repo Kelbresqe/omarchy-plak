@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Keybinding entry point: forwards one verb to the running shell widget.
+#   ytm toggle | open | close | playPause | next | prev | like | reveal | hide | launch
+#   ytm view player|playlists|queue|lyrics|search
+# The verb list is closed on purpose: this script is what a keybind runs.
+set -euo pipefail
+verb="${1:-toggle}"
+case "$verb" in
+  toggle|open|close|playPause|next|prev|like|reveal|hide|launch)
+    exec qs -p /usr/share/omarchy/shell ipc call tiertek.ytm "$verb" ;;
+  view)
+    case "${2:-}" in
+      player|playlists|queue|lyrics|search) exec qs -p /usr/share/omarchy/shell ipc call tiertek.ytm view "$2" ;;
+      *) echo "ytm: unknown view: ${2:-}" >&2; exit 2 ;;
+    esac ;;
+  *) echo "ytm: unknown verb: $verb" >&2; exit 2 ;;
+esac

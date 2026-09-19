@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "id": "tiertek.ytm",
+  "name": "TekTube",
+  "version": "0.1.0",
+  "author": "TierTek",
+  "license": "MIT",
+  "description": "TekTube — your real YouTube Music account in the Omarchy bar: playlists, library, queue, synced lyrics, likes and radio, drawn from your theme. Signs in through a normal Google login; no cookies or tokens ever leave the browser.",
+  "homepage": "https://github.com/TIerTek/omarchy-tektube",
+  "repository": "https://github.com/TIerTek/omarchy-tektube",
+  "kinds": ["bar-widget", "service"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "barWidget": "BarWidget.qml",
+    "service": "Service.qml"
+  },
+  "barWidget": {
+    "displayName": "TekTube",
+    "description": "TekTube: now playing, playlists, mixes, queue and synced lyrics for your YouTube Music account",
+    "category": "Media",
+    "allowMultiple": false,
+    "defaultSection": "left",
+    "defaults": {
+      "browser": "",
+      "showWhenIdle": true,
+      "toast": true,
+      "autoRelaunch": false,
+      "parkWindow": true,
+      "visualizer": true,
+      "maxLabelWidth": 180
+    },
+    "schema": [
+      { "key": "browser", "type": "string", "label": "Browser", "defaultValue": "", "description": "Executable name of a Chromium-family browser. Empty = your default browser if it is Chromium-based, else the first of Chrome, Brave, Chromium, Vivaldi, Edge found." },
+      { "key": "showWhenIdle", "type": "bool", "label": "Show in bar when nothing is playing", "defaultValue": true },
+      { "key": "toast", "type": "bool", "label": "Notify on track change", "defaultValue": true },
+      { "key": "autoRelaunch", "type": "bool", "label": "Reopen YouTube Music automatically if its window is closed", "defaultValue": false },
+      { "key": "parkWindow", "type": "bool", "label": "Keep the YouTube Music window in a hidden special workspace", "defaultValue": true },
+      { "key": "visualizer", "type": "bool", "label": "Spectrum bars (needs cava)", "defaultValue": true },
+      { "key": "maxLabelWidth", "type": "number", "label": "Bar label width (px)", "defaultValue": 180 }
+    ]
+  }
+}

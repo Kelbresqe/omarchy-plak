@@ -1,0 +1,16 @@
+ok|PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf
+ok|dQw4w9WgXcQ
+ok|VLPL123456789
+ok|MPLYt_abcdef12345
+ok|RDAMVMdQw4w9WgXcQ
+ok|-abcdefgh
+ok|_underscore_ok
+bad|
+bad|a
+ok|LM
+bad|PL;touch /tmp/x
+bad|PL 123456789
+bad|PL123456789$(id)
+bad|PL1234567890123456789012345678901234567890123456789012345678901234
+bad|PL12345678'
+bad|PL12345678"

@@ -1,0 +1,3 @@
+{"browseId":"MPLYt_abcdef12345",
+ "timedRaw":{"contents":{"elementRenderer":{"newElement":{"type":{"componentType":{"model":{"timedLyricsModel":{"lyricsData":{"timedLyricsData":[{"lyricLine":"We're no strangers to love","cueRange":{"startTimeMilliseconds":"18500","endTimeMilliseconds":"22000"}},{"lyricLine":"You know the rules","cueRange":{"startTimeMilliseconds":"22100"}},{"lyricLine":"broken","cueRange":{}}],"sourceMessage":"Source: Musixmatch"}}}}}}}}},
+ "plainRaw":{"contents":{"sectionListRenderer":{"contents":[{"musicDescriptionShelfRenderer":{"description":{"runs":[{"text":"We're no strangers to love\nYou know the rules"}]},"footer":{"runs":[{"text":"Source: Musixmatch"}]}}}]}}}}
