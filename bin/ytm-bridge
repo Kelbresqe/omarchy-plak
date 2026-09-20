@@ -36,6 +36,17 @@ MAX_QUERY = 200
 PAGE_URL_PREFIX = "https://music.youtube.com"
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
+# Everything read from the browser endpoint is bounded, because what comes
+# back is shaped by the remote page. Measured on a live account 2026-09-20:
+# the largest CDP reply is `home` (3 pages) at 1.35 MB on the wire, then a
+# 10-page `playlist.items` at 1.08 MB. Anything past these caps is not a
+# bigger answer, it is a broken or hostile peer, and the connection is
+# closed rather than buffered.
+MAX_HANDSHAKE = 16 * 1024          # HTTP 101 response, headers included
+MAX_FRAME = 16 * 1024 * 1024       # one WebSocket frame's declared length
+MAX_MESSAGE = 16 * 1024 * 1024     # a fragmented message, all pieces together
+MAX_VERSION_JSON = 64 * 1024       # GET /json/version body
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 POLL_MS = int(os.environ.get("YTM_POLL_MS", "1000"))
 
@@ -70,22 +81,36 @@ class WebSocket:
         self.sock.sendall(req.encode())
         head = b""
         while b"\r\n\r\n" not in head:
-            chunk = self.sock.recv(4096)
+            if len(head) >= MAX_HANDSHAKE:
+                self._fail("handshake too long")
+            chunk = self.sock.recv(min(4096, MAX_HANDSHAKE - len(head)))
             if not chunk:
-                raise WebSocketClosed("handshake")
+                self._fail("handshake")
             head += chunk
         head, rest = head.split(b"\r\n\r\n", 1)
         if b" 101" not in head.split(b"\r\n", 1)[0]:
-            raise WebSocketClosed("upgrade refused")
+            self._fail("upgrade refused")
         self.buf = rest
         self.sock.settimeout(None)
         self.lock = threading.Lock()
 
+    def _fail(self, why):
+        # Drop the socket outright: no close frame, the peer has already
+        # shown it cannot be trusted to read one. Reader threads see the
+        # exception; the attacher treats it like a browser restart.
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+        raise WebSocketClosed(why)
+
     def _read(self, n):
+        # Callers bound n (a header or a length-checked payload) before
+        # asking, so the buffer never grows past a frame plus one recv.
         while len(self.buf) < n:
             chunk = self.sock.recv(65536)
             if not chunk:
-                raise WebSocketClosed("eof")
+                self._fail("eof")
             self.buf += chunk
         out, self.buf = self.buf[:n], self.buf[n:]
         return out
@@ -113,6 +138,7 @@ class WebSocket:
 
     def recv_text(self):
         parts = []
+        total = 0
         while True:
             b0, b1 = self._read(2)
             fin, opcode = b0 & 0x80, b0 & 0x0F
@@ -121,6 +147,14 @@ class WebSocket:
                 n = struct.unpack(">H", self._read(2))[0]
             elif n == 127:
                 n = struct.unpack(">Q", self._read(8))[0]
+            # Both checks happen on the declared length, before a byte of
+            # the payload is buffered.
+            if n > MAX_FRAME:
+                self._fail("frame too large: %d" % n)
+            if opcode < 0x8:            # data frame: part of the message
+                total += n
+                if total > MAX_MESSAGE:
+                    self._fail("message too large: %d" % total)
             mask = self._read(4) if b1 & 0x80 else None
             payload = self._read(n)
             if mask:
@@ -296,7 +330,7 @@ class Attacher:
         self._set("attaching")
         try:
             with urllib.request.urlopen("http://127.0.0.1:%d/json/version" % port[0], timeout=3) as r:
-                ws_url = json.load(r)["webSocketDebuggerUrl"]
+                ws_url = json.loads(r.read(MAX_VERSION_JSON))["webSocketDebuggerUrl"]
             cdp = Cdp(ws_url)
         except (OSError, ValueError, KeyError, WebSocketClosed):
             # Stale port file from a browser that is gone.

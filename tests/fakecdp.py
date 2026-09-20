@@ -27,6 +27,7 @@ class FakeBrowser:
         self.methods = []        # every CDP method name seen
         self._ws = None
         self._ws_lock = threading.Lock()
+        self.ws_count = 0        # websocket connections accepted so far
         self._next_session = 0
         fake = self
         os.makedirs(profile_dir, exist_ok=True)
@@ -86,6 +87,15 @@ class FakeBrowser:
     def close(self):
         self.httpd.shutdown()
 
+    def send_raw(self, data):
+        """Push bytes straight down the open websocket, no framing. Lets a test
+        speak a frame header the fake would never produce (a lying length)."""
+        with self._ws_lock:
+            ws = self._ws
+            if ws is None:
+                raise ConnectionError("no websocket")
+            ws.sendall(data)
+
     # -- websocket -----------------------------------------------------
     def _send(self, obj):
         with self._ws_lock:
@@ -132,6 +142,7 @@ class FakeBrowser:
     def _serve_ws(self, conn):
         with self._ws_lock:
             self._ws = conn
+            self.ws_count += 1
         try:
             while True:
                 opcode, payload = self._recv_frame(conn)

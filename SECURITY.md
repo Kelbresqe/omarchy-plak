@@ -45,6 +45,17 @@ Artwork URLs must match `https://*.{googleusercontent,ytimg,ggpht,gstatic}.com/�
 The bridge's protocol rejects unknown ops, malformed JSON and oversized
 lines without dropping the client; the fake-DevTools test suite covers each.
 
+## What comes back from the browser is bounded
+
+The DevTools channel carries JSON shaped by the remote page, so every read
+from it has a hard cap and the connection is closed — not buffered — the
+moment one is exceeded: the HTTP upgrade response (16 KiB), `/json/version`
+(64 KiB), one WebSocket frame's declared length and a fragmented message's
+total (16 MiB each). The largest real reply measured on a live account is
+`home` at 1.35 MB on the wire. Artwork downloads stop at 2 MiB. The tests
+drive each limit from a hostile endpoint and check the bridge re-attaches
+afterwards.
+
 ## The timed-lyrics request
 
 Timed lyrics are only served to YouTube's mobile clients. That one request is

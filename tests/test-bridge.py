@@ -3,9 +3,11 @@ import importlib.machinery
 import json
 import os
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 
@@ -14,6 +16,8 @@ ROOT = os.path.dirname(HERE)
 BRIDGE = os.path.join(ROOT, "bin", "ytm-bridge")
 sys.path.insert(0, HERE)
 from fakecdp import FakeBrowser  # noqa: E402
+
+bridge = importlib.machinery.SourceFileLoader("ytm_bridge", BRIDGE).load_module()
 
 
 class Client:
@@ -153,6 +157,23 @@ class BridgeTest(Base):
         self.browser.add_target("T2")
         c.wait_event("state", "ready", timeout=8)
 
+    def test_oversized_frame_drops_and_reattaches(self):
+        # The browser endpoint announces a frame far beyond the limit. The
+        # bridge must close that connection instead of buffering towards it,
+        # then attach again as if the browser had restarted.
+        c = Client(self.sockpath)
+        self.browser.write_port_file()
+        self.wait_state(c, "ready")
+        conns, enables = self.browser.ws_count, self.browser.methods.count("Runtime.enable")
+        self.browser.send_raw(bytes([0x81, 127]) + struct.pack(">Q", bridge.MAX_FRAME + 1) + b"x" * 1024)
+        for _ in range(50):
+            if self.browser.ws_count > conns:
+                break
+            time.sleep(0.1)
+        self.assertGreater(self.browser.ws_count, conns, "bridge kept the oversized connection open")
+        self.wait_state(c, "ready")
+        self.assertGreater(self.browser.methods.count("Runtime.enable"), enables)
+
     def test_page_exception_is_page_error(self):
         c = Client(self.sockpath)
         self.browser.write_port_file()
@@ -246,6 +267,116 @@ class OpsTest(Base):
         c = self.ready()
         self.assertEqual(c.call("art", url="https://evil.example/x.jpg")["error"], "bad-request")
         self.assertEqual(c.call("art", url="http://i.ytimg.com/x.jpg")["error"], "bad-request")
+
+
+class RawServer:
+    """A TCP endpoint that runs `script(conn)` for the one client that connects."""
+
+    def __init__(self, script):
+        self.srv = socket.socket()
+        self.srv.bind(("127.0.0.1", 0))
+        self.srv.listen(1)
+        self.port = self.srv.getsockname()[1]
+        self.script = script
+        self.client_gone = threading.Event()
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self):
+        conn, _ = self.srv.accept()
+        conn.settimeout(5)
+        try:
+            self.script(conn)
+        except OSError:
+            pass
+        finally:
+            self.client_gone.set()
+            conn.close()
+            self.srv.close()
+
+    def url(self):
+        return "ws://127.0.0.1:%d/x" % self.port
+
+
+def upgrade_101(conn):
+    # Read the client's request, answer 101. Accept key unchecked: the client
+    # under test does not verify it and that is not what these tests cover.
+    buf = b""
+    while b"\r\n\r\n" not in buf:
+        buf += conn.recv(4096)
+    conn.sendall(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
+
+
+def frame(payload, fin=True, opcode=0x1):
+    hdr = bytes([(0x80 if fin else 0) | opcode])
+    n = len(payload)
+    if n < 126:
+        hdr += bytes([n])
+    elif n < 65536:
+        hdr += bytes([126]) + struct.pack(">H", n)
+    else:
+        hdr += bytes([127]) + struct.pack(">Q", n)
+    return hdr + payload
+
+
+class WebSocketLimitTest(unittest.TestCase):
+    """bin/ytm-bridge's WebSocket client against a hostile endpoint. Every
+    limit must close the connection before the offending bytes are buffered."""
+
+    def test_handshake_without_terminator(self):
+        def script(conn):
+            conn.recv(4096)
+            # Header lines forever, never a blank one.
+            for _ in range(bridge.MAX_HANDSHAKE // 64 + 8):
+                conn.sendall(b"X-Filler: " + b"a" * 52 + b"\r\n")
+        srv = RawServer(script)
+        with self.assertRaisesRegex(bridge.WebSocketClosed, "handshake too long"):
+            bridge.WebSocket(srv.url())
+        self.assertTrue(srv.client_gone.wait(5))
+
+    def test_frame_length_over_limit(self):
+        def script(conn):
+            upgrade_101(conn)
+            conn.sendall(bytes([0x81, 127]) + struct.pack(">Q", bridge.MAX_FRAME + 1))
+            conn.sendall(b"y" * 4096)
+            self.assertEqual(conn.recv(1), b"")     # client hung up without reading it
+        srv = RawServer(script)
+        ws = bridge.WebSocket(srv.url())
+        with self.assertRaisesRegex(bridge.WebSocketClosed, "frame too large"):
+            ws.recv_text()
+        self.assertTrue(srv.client_gone.wait(5))
+
+    def test_fragments_over_limit(self):
+        # Each fragment is legal on its own; together they exceed the message cap.
+        piece = b"z" * (64 * 1024)
+        pieces = bridge.MAX_MESSAGE // len(piece) + 2
+
+        def script(conn):
+            upgrade_101(conn)
+            conn.sendall(frame(piece, fin=False))
+            for _ in range(pieces):
+                conn.sendall(frame(piece, fin=False, opcode=0x0))
+            conn.sendall(frame(piece, fin=True, opcode=0x0))
+        srv = RawServer(script)
+        ws = bridge.WebSocket(srv.url())
+        with self.assertRaisesRegex(bridge.WebSocketClosed, "message too large"):
+            ws.recv_text()
+        self.assertTrue(srv.client_gone.wait(5))
+
+    def test_message_under_limit_still_arrives(self):
+        # Largest real payload measured on a live account was ~1.4 MB (home);
+        # a 4 MB message split into fragments must still get through.
+        body = b"{" + b"\"k\":\"" + b"v" * (4 * 1024 * 1024) + b"\"}"
+        half = len(body) // 2
+
+        def script(conn):
+            upgrade_101(conn)
+            conn.sendall(frame(body[:half], fin=False))
+            conn.sendall(frame(body[half:], fin=True, opcode=0x0))
+            conn.recv(1)
+        srv = RawServer(script)
+        ws = bridge.WebSocket(srv.url())
+        self.assertEqual(ws.recv_text(), body.decode())
+        ws.close()
 
 
 class CheckIdTest(unittest.TestCase):

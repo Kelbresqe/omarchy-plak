@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "tiertek.ytm",
   "name": "TekTube",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "TierTek",
   "license": "MIT",
   "description": "TekTube — your real YouTube Music account in the Omarchy bar: playlists, library, queue, synced lyrics, likes and radio, drawn from your theme. Signs in through a normal Google login; no cookies or tokens ever leave the browser.",
