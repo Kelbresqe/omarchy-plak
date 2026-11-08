@@ -73,9 +73,10 @@ Item {
       root.loadLibrary()
       root.loadHome()
       root.loadVolume()
+      root.loadRepeat()
       root.onTrack(root.video)
     }
-    if (root.app !== "ready") root.volume = -1
+    if (root.app !== "ready") { root.volume = -1; root.repeatMode = "" }
     if (root.video !== wasVideo) root.onTrack(root.video)
   }
 
@@ -142,8 +143,29 @@ Item {
     root.request("volume.set", { volume: Math.round(v * 100) }, function(m) { if (!m.ok) root.loadVolume() })
   }
   function nudgeVolume(delta) { if (root.volumeSupported) setVolume(root.volume + delta) }
+  // Repeat: NONE / ALL / ONE, read from and set through the page's player bar
+  // (Chromium's MPRIS player has no LoopStatus). "" until the page answers.
+  property string repeatMode: ""
+  readonly property bool repeatSupported: root.ready && root.repeatMode !== ""
+
+  function loadRepeat() {
+    root.request("repeat.get", null, function(m) {
+      if (m.ok && m.data) root.repeatMode = String(m.data.mode || "")
+    })
+  }
+  // Same order as the site's own button: off → all → one → off.
+  function cycleRepeat() {
+    if (!root.repeatSupported) return
+    var next = { NONE: "ALL", ALL: "ONE", ONE: "NONE" }[root.repeatMode] || "NONE"
+    root.repeatMode = next                              // optimistic
+    root.request("repeat.set", { mode: next }, function(m) {
+      if (m.ok && m.data && m.data.mode) root.repeatMode = String(m.data.mode)
+      else root.loadRepeat()
+    })
+  }
+
   // Pick up a change made in the YouTube Music window itself.
-  onPanelOpenChanged: if (root.panelOpen && root.ready) root.loadVolume()
+  onPanelOpenChanged: if (root.panelOpen && root.ready) { root.loadVolume(); root.loadRepeat() }
 
   // ---------------------------------------------------------------- bridge process
 
@@ -301,6 +323,7 @@ Item {
     if (!videoId || !root.ready) return
     queueRefresh.restart()
     root.refreshLiked()
+    root.loadRepeat()      // a `play` reloads the page, which may reset it
     root.trackChanged(videoId)
   }
 

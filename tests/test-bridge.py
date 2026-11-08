@@ -238,6 +238,18 @@ class OpsTest(Base):
             self.assertEqual(c.call("volume.set", volume=bad)["error"], "bad-request", bad)
         self.assertEqual(len(self.browser.calls), n)   # nothing invalid reached the page
 
+    def test_repeat_forwards_validated_mode(self):
+        c = self.ready()
+        self.browser.canned.update({"repeat.get": {"mode": "NONE"}, "repeat.set": {"mode": "ONE"}})
+        self.assertEqual(c.call("repeat.get")["data"], {"mode": "NONE"})
+        self.assertEqual(self.last_call(), ("repeat.get", {}))
+        self.assertEqual(c.call("repeat.set", mode="ONE")["data"], {"mode": "ONE"})
+        self.assertEqual(self.last_call(), ("repeat.set", {"mode": "ONE"}))
+        n = len(self.browser.calls)
+        for bad in ("one", "", "ALL ", 1, None, ["ALL"]):
+            self.assertEqual(c.call("repeat.set", mode=bad)["error"], "bad-request", bad)
+        self.assertEqual(len(self.browser.calls), n)   # nothing invalid reached the page
+
     def test_play_forwards_shuffle_and_follows_up(self):
         c = self.ready()
         self.browser.canned.update({"play": {"navigated": True}, "player.shuffle": {"shuffled": True}})

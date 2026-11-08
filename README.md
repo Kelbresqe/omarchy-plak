@@ -110,6 +110,7 @@ your way. Bring it back with the ↗ button in the panel, `Super+Shift+M`
 | `Enter` / `Space` | play the selected item (Space = play/pause in Now playing) |
 | `,` `.` | previous / next track |
 | `f` `d` `r` | like · dislike · start radio from the current song |
+| `t` | repeat: off → all → this song → off |
 | `a` `s` | inside a playlist: play all · shuffle |
 | `g` | queue / lyrics: jump back to the current line |
 | `R` | Home: refresh the rows |

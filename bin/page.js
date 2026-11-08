@@ -104,6 +104,21 @@
     return bar ? bar.querySelector("#volume-slider") : null
   }
 
+  // Repeat lives on the player bar as `repeatMode` (NONE / ALL / ONE) and is
+  // changed by its repeat button, which cycles NONE → ALL → ONE. Chromium's
+  // MPRIS player has no LoopStatus, so this is the only way in. The bar holds
+  // two .repeat buttons; the visible one is in .right-controls-buttons.
+  const REPEAT_MODES = ["NONE", "ALL", "ONE"]
+  function repeatMode() {
+    const bar = playerBar()
+    const m = bar ? String(bar.repeatMode || bar.getAttribute("repeat-mode") || "") : ""
+    return REPEAT_MODES.includes(m) ? m : null
+  }
+  function repeatButton() {
+    const bar = playerBar()
+    return bar ? bar.querySelector(".right-controls-buttons .repeat") || bar.querySelector(".repeat") : null
+  }
+
   // Polymer elements expose their renderer JSON as `.data`; the queue items
   // carry the same playlistPanelVideoRenderer shape the `next` endpoint uses,
   // so the parser in Ytm.js handles both without knowing which one it got.
@@ -271,6 +286,27 @@
       s.value = arg.volume
       s.dispatchEvent(new CustomEvent("change", { bubbles: true }))
       return { volume: Number(s.value) }
+    },
+
+    // `mode` is null while the bar is not up.
+    async "repeat.get"() {
+      return { mode: repeatMode() }
+    },
+
+    // Click the site's own button until it reaches `arg.mode` (at most two
+    // clicks around the cycle), waiting for each click to land. Setting a
+    // target instead of "cycle once" keeps a double-click in the shell from
+    // skipping a mode.
+    async "repeat.set"(arg) {
+      for (let n = 0; n < REPEAT_MODES.length; n++) {
+        const now = repeatMode()
+        if (now === null || now === arg.mode) return { mode: now }
+        const btn = repeatButton()
+        if (!btn) return { mode: now }
+        btn.click()
+        for (let t = 0; t < 20 && repeatMode() === now; t++) await new Promise(r => setTimeout(r, 25))
+      }
+      return { mode: repeatMode() }
     },
   }
 

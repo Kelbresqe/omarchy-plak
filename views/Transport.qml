@@ -120,11 +120,20 @@ Column {
       }
     }
 
-    // Right: volume, show window.
+    // Right: repeat, volume, show window.
     Row {
       anchors.right: parent.right
       anchors.verticalCenter: parent.verticalCenter
       spacing: Style.space(6)
+      PanelActionButton {
+        readonly property string mode: root.svc ? root.svc.repeatMode : ""
+        iconText: mode === "ONE" ? "\u{F0458}" : mode === "ALL" ? "\u{F0456}" : "\u{F0457}"
+        foreground: mode === "ALL" || mode === "ONE" ? Color.accent : Color.foreground
+        tooltipText: mode === "ONE" ? "Repeat: this song (t)" : mode === "ALL" ? "Repeat: all (t)" : "Repeat: off (t)"
+        fontFamily: root.family
+        visible: root.svc && root.svc.repeatSupported
+        onClicked: root.svc.cycleRepeat()
+      }
       Text {
         anchors.verticalCenter: parent.verticalCenter
         textFormat: Text.PlainText

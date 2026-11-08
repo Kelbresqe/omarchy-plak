@@ -620,6 +620,15 @@ class Ops:
             raise BadRequest("volume")
         return {"data": self._page("volume.set", {"volume": v})}
 
+    def op_repeat_get(self, arg):
+        return {"data": self._page("repeat.get", {})}
+
+    def op_repeat_set(self, arg):
+        mode = arg.get("mode")
+        if mode not in ("NONE", "ALL", "ONE"):
+            raise BadRequest("mode")
+        return {"data": self._page("repeat.set", {"mode": mode})}
+
     def op_art(self, arg):
         """Download an artwork URL into the cache and return its path, for
         notify-send, which needs a file. Only https://*.googleusercontent.com
