@@ -74,6 +74,48 @@
     return ORIGIN + "/watch?" + p.toString()
   }
 
+  function currentList() {
+    const ok = v => typeof v === "string" && /^[A-Za-z0-9_-]{2,64}$/.test(v)
+    try {
+      const mp = document.getElementById("movie_player")
+      const pl = mp && typeof mp.getPlaylistId === "function" ? mp.getPlaylistId() : ""
+      if (ok(pl)) return pl
+    } catch (e) { /* player not up yet */ }
+    const l = new URLSearchParams(location.search).get("list")
+    return ok(l) ? l : ""
+  }
+
+  // Start playback in place, the way the site's own links do: a yt-navigate
+  // event carrying a watch endpoint, fired at <ytmusic-app>. Loading the URL
+  // instead reloads the page, and while something plays the site answers that
+  // with a "Leave site?" prompt that pops the window up and blocks until it
+  // is confirmed. If the app does not pick the navigation up within a few
+  // seconds (the site changed), fall back to loading the URL; the bridge
+  // confirms that prompt itself. Resolves to {navigated, reloaded}.
+  async function watch(video, list) {
+    const app = document.querySelector("ytmusic-app")
+    const before = currentVideo()
+    if (app) {
+      const we = {}
+      const p = new URLSearchParams()
+      if (video) { we.videoId = video; p.set("v", video) }
+      if (list) { we.playlistId = list; p.set("list", list) }
+      app.dispatchEvent(new CustomEvent("yt-navigate", { bubbles: true, composed: true, detail: { endpoint: {
+        commandMetadata: { webCommandMetadata: { url: "/watch?" + p.toString(), webPageType: "WEB_PAGE_TYPE_WATCH", rootVe: 3832 } },
+        watchEndpoint: we,
+      } } }))
+      // Taken once the requested track is loaded; for a bare list, once that
+      // list is loaded with a different track than before.
+      for (let i = 0; i < 40; i++) {
+        const v = currentVideo()
+        if (video ? v === video : (currentList() === list && v !== "" && v !== before)) return { navigated: true, reloaded: false }
+        await new Promise(r => setTimeout(r, 100))
+      }
+    }
+    location.assign(watchUrl(video, list))
+    return { navigated: true, reloaded: true }
+  }
+
   // The playing track. The HTML5 player knows best; the queue's `selected`
   // flag lingers on the previous track's video twin after a skip, and the
   // URL is only /watch?v=… right after a navigation.
@@ -254,13 +296,11 @@
     async play(arg) {
       let list = arg.list || ""
       if (list.startsWith("VL")) list = list.slice(2)
-      location.assign(watchUrl(arg.video || "", list))
-      return { navigated: true }
+      return watch(arg.video || "", list)
     },
 
     async radio(arg) {
-      location.assign(watchUrl(arg.video, "RDAMVM" + arg.video))
-      return { navigated: true }
+      return watch(arg.video, "RDAMVM" + arg.video)
     },
 
     // Click the player bar's shuffle button unless it is already on. Used by

@@ -342,15 +342,43 @@ class OpsTest(Base):
 
     def test_play_forwards_shuffle_and_follows_up(self):
         c = self.ready()
-        self.browser.canned.update({"play": {"navigated": True}, "player.shuffle": {"shuffled": True}})
+        # In-app navigation: the list is up when `play` returns, so shuffle
+        # follows at once instead of waiting for a page load.
+        self.browser.canned.update({"play": {"navigated": True, "reloaded": False}, "player.shuffle": {"shuffled": True}})
+        t0 = time.time()
         r = c.call("play", list="PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf", shuffle=True)
         self.assertTrue(r["ok"])
+        self.assertLess(time.time() - t0, 3)
         ops = [p["arguments"][0]["value"] for p in self.browser.calls]
         self.assertIn("play", ops)
         self.assertEqual(ops[-1], "player.shuffle")
         self.assertEqual(self.browser.calls[ops.index("play")]["arguments"][1]["value"],
                          {"list": "PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf", "video": None, "shuffle": True})
         self.assertEqual(c.call("play")["error"], "bad-id")
+
+    def test_shuffle_play_after_fallback_reload_waits_for_the_page(self):
+        c = self.ready()
+        self.browser.canned.update({"play": {"navigated": True, "reloaded": True}, "player.shuffle": {"shuffled": True}})
+        gen_before = len([m for m in self.browser.methods if m == "Runtime.evaluate"])
+        r = c.call("play", list="PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf", shuffle=True)
+        self.assertTrue(r["ok"])
+        ops = [p["arguments"][0]["value"] for p in self.browser.calls]
+        self.assertEqual(ops[-1], "player.shuffle")
+        # page.js was installed again after the (fake) reload, before shuffling
+        self.assertGreater(len([m for m in self.browser.methods if m == "Runtime.evaluate"]), gen_before)
+
+    def test_leave_prompt_is_confirmed_only_for_beforeunload(self):
+        self.ready()
+        self.browser._send({"method": "Page.javascriptDialogOpening", "sessionId": "S1",
+                            "params": {"type": "alert", "message": "hi"}})
+        time.sleep(0.4)
+        self.assertNotIn("Page.handleJavaScriptDialog", self.browser.methods)
+        self.browser._send({"method": "Page.javascriptDialogOpening", "sessionId": "S1",
+                            "params": {"type": "beforeunload", "message": ""}})
+        end = time.time() + 3
+        while "Page.handleJavaScriptDialog" not in self.browser.methods and time.time() < end:
+            time.sleep(0.05)
+        self.assertIn("Page.handleJavaScriptDialog", self.browser.methods)
 
     def test_home_forwards_and_caches(self):
         c = self.ready()

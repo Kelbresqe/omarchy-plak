@@ -575,6 +575,17 @@ class Attacher:
             p = ev.get("params", {}) or {}
             if m == "__closed":
                 return
+            if m == "Page.javascriptDialogOpening" and ev.get("sessionId") == self.session \
+                    and p.get("type") == "beforeunload":
+                # The site's "Leave site?" prompt, raised when a play has to
+                # fall back to loading the URL while music plays. Leaving is
+                # what was asked for; an unanswered prompt pops the window up
+                # and blocks the page. Only beforeunload is ever answered.
+                try:
+                    cdp.call("Page.handleJavaScriptDialog", {"accept": True}, session=self.session)
+                except CdpError as e:
+                    log("leave prompt not answered", e)
+                continue
             if m in ("Target.targetDestroyed", "Target.detachedFromTarget") and p.get("targetId") == self.target:
                 with self.lock:
                     self.session, self.target = None, None
@@ -688,11 +699,15 @@ class Ops:
             return {"resumed": False}
         gen = self.att.nav_gen
         a = {"video": m["video"], "list": m.get("list") or None, "shuffle": False}
-        self._page("play", a)
+        played = self._page("play", a) or {}
         t = m.get("time", 0)
         if t >= 5:
+            # Only a fallback full load needs waiting for; in-app navigation
+            # has the track loaded by the time `play` returns. The seek below
+            # retries until it is the requested track either way.
             deadline = time.time() + 15
-            while time.time() < deadline and (self.att.nav_gen == gen or self.att.state != "ready"):
+            while played.get("reloaded") and time.time() < deadline \
+                    and (self.att.nav_gen == gen or self.att.state != "ready"):
                 time.sleep(0.2)
             for _ in range(20):
                 try:
@@ -812,10 +827,12 @@ class Ops:
         gen = self.att.nav_gen
         data = self._page("play", a)
         if a["shuffle"]:
-            # The page reloads on play; wait for it to come back, then turn
-            # shuffle on in the player bar (there is no URL parameter for it).
+            # Turn shuffle on in the player bar once the new list is up (there
+            # is no URL parameter for it). In-app navigation returns with the
+            # list loaded; only a fallback full load needs waiting for.
             deadline = time.time() + 12
-            while time.time() < deadline and (self.att.nav_gen == gen or self.att.state != "ready"):
+            while (data or {}).get("reloaded") and time.time() < deadline \
+                    and (self.att.nav_gen == gen or self.att.state != "ready"):
                 time.sleep(0.2)
             for _ in range(10):
                 try:
