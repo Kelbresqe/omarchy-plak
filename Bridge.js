@@ -69,7 +69,10 @@ function describe(app, link) {
   if (link !== "up" || app === "bridge-down") return { text: "Starting the bridge…", action: "" }
   if (app === "no-app") return { text: "YouTube Music is not open", action: "launch" }
   if (app === "attaching") return { text: "Connecting to YouTube Music…", action: "" }
-  if (app === "signed-out") return { text: "Sign in to YouTube Music in its window", action: "reveal" }
+  // Google refuses to sign in the remote-controlled app window, so signing in
+  // goes through a plain browser window (bridge op app.signin).
+  if (app === "signed-out") return { text: "Not signed in to YouTube Music", action: "signin" }
+  if (app === "signing-in") return { text: "Sign in in the Google window, then close it. TekTube reopens by itself.", action: "" }
   return { text: "", action: "" }
 }
 

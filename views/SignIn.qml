@@ -35,7 +35,7 @@ Column {
     width: parent.width
     visible: svc && svc.app === "signed-out"
     textFormat: Text.PlainText
-    text: "Use your normal Google login. The window keeps its own browser profile; this plugin never sees your password or cookies."
+    text: "Opens Google's sign-in page in a normal browser window, with the address bar showing. Google blocks sign-in in TekTube's own window because the plugin remote-controls it. The window uses TekTube's own browser profile, and the plugin never sees your password or cookies."
     color: Color.foreground
     opacity: 0.45
     font.family: root.family
@@ -44,12 +44,14 @@ Column {
   }
   Button {
     visible: root.desc.action !== ""
-    text: root.desc.action === "launch" ? "Open YouTube Music" : "Show the window"
+    text: root.desc.action === "launch" ? "Open YouTube Music"
+        : root.desc.action === "signin" ? "Sign in with Google" : "Show the window"
     bordered: true
     fontFamily: root.family
     onClicked: {
       if (!svc) return
       if (root.desc.action === "launch") svc.launchApp()
+      else if (root.desc.action === "signin") svc.signIn()
       else svc.revealApp()
     }
   }

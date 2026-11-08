@@ -51,7 +51,9 @@ t("reducer", () => {
 
 t("describe", () => {
   assert.equal(B.describe("no-app", "up").action, "launch")
-  assert.equal(B.describe("signed-out", "up").action, "reveal")
+  assert.equal(B.describe("signed-out", "up").action, "signin")
+  assert.equal(B.describe("signing-in", "up").action, "")
+  assert.ok(B.describe("signing-in", "up").text.length > 0)
   assert.equal(B.describe("ready", "up").text, "")
   assert.equal(B.describe("ready", "down").action, "")
 })

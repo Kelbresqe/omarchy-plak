@@ -49,6 +49,8 @@ MAX_VERSION_JSON = 64 * 1024       # GET /json/version body
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 POLL_MS = int(os.environ.get("YTM_POLL_MS", "1000"))
+# How long app.signin waits for the app window to quit before giving up.
+CLOSE_WAIT_S = float(os.environ.get("YTM_CLOSE_WAIT_S", "10"))
 
 
 def log(*parts):
@@ -251,10 +253,12 @@ class Cdp:
 
 class Attacher:
     """Keeps a session attached to the music.youtube.com page, whatever the
-    browser does. State is one of no-app / attaching / signed-out / ready."""
+    browser does. State is one of no-app / signing-in / attaching /
+    signed-out / ready."""
 
-    def __init__(self, profile, on_state, on_track=None):
+    def __init__(self, profile, on_state, on_track=None, signin_marker=None):
         self.profile = profile
+        self.signin_marker = signin_marker
         self.on_state = on_state
         self.on_track = on_track or (lambda v: None)
         self.state = "no-app"
@@ -293,6 +297,47 @@ class Attacher:
         except (OSError, ValueError, IndexError):
             return 0
 
+    def browser_alive(self):
+        pid = self.browser_pid()
+        if not pid:
+            return False
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            pass
+        return True
+
+    def signing_in(self):
+        """True while `ytm-app --signin` (or the bridge handing over to it)
+        holds the marker: the plain sign-in window is up and nothing can be
+        attached, which is not the same as "not open"."""
+        if not self.signin_marker:
+            return False
+        try:
+            with open(self.signin_marker, encoding="utf-8") as f:
+                pid = int(f.read().strip())
+            os.kill(pid, 0)
+        except (OSError, ValueError):
+            return False
+        return True
+
+    def close_browser(self, wait_s):
+        """Ask our browser to quit over DevTools (a clean exit, so cookies are
+        flushed), then wait for its profile lock to go."""
+        with self.lock:
+            cdp = self.cdp
+        if cdp and not cdp.closed.is_set():
+            try:
+                cdp.call("Browser.close", timeout=5)
+            except CdpError:
+                pass
+        deadline = time.time() + wait_s
+        while time.time() < deadline and self.browser_alive():
+            time.sleep(0.1)
+        return not self.browser_alive()
+
     def _read_port(self):
         try:
             with open(self._port_file(), encoding="utf-8") as f:
@@ -313,7 +358,7 @@ class Attacher:
                 if self.cdp is None or self.cdp.closed.is_set():
                     self._drop()
                     if not self._try_attach():
-                        self._set("no-app")
+                        self._set("signing-in" if self.signing_in() else "no-app")
                         time.sleep(POLL_MS / 1000.0)
                         continue
                 self._pump_events()
@@ -514,6 +559,46 @@ class Ops:
         except OSError as e:
             raise BadRequest("launcher: %s" % e)
         return {"launched": True}
+
+    def op_app_signin(self, arg):
+        """Sign in without the debug port. Google refuses to sign in a browser
+        under remote control ("This browser or app may not be secure"), so
+        close our app window and hand over to `ytm-app --signin`, which opens a
+        plain window on the same profile, waits for the user to close it and
+        launches the app again."""
+        marker = self.att.signin_marker
+        if not marker:
+            raise BadRequest("no sign-in marker")
+        with self.launch_lock:
+            if time.time() - self.last_launch < 5:
+                return {"started": False, "reason": "recent"}
+            self.last_launch = time.time()
+        cmd = [self.launcher, "--signin", "--marker", marker]
+        browser = arg.get("browser")
+        if browser:
+            if not re.match(r"^[A-Za-z0-9._-]+$", str(browser)):
+                raise BadRequest("browser")
+            cmd += ["--browser", str(browser)]
+
+        def clear():
+            try:
+                os.unlink(marker)
+            except OSError:
+                pass
+        # Hold the marker ourselves until the launcher takes it over, so the
+        # state reads "signing-in" rather than "no-app" in between.
+        with open(marker, "w", encoding="utf-8") as f:
+            f.write("%d\n" % os.getpid())
+        if not self.att.close_browser(CLOSE_WAIT_S):
+            clear()
+            return {"started": False, "reason": "busy"}
+        try:
+            subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError as e:
+            clear()
+            raise BadRequest("launcher: %s" % e)
+        return {"started": True}
 
     # -- page-backed ---------------------------------------------------
     def _page(self, op, arg):
@@ -847,7 +932,7 @@ def main():
         if s:
             s.broadcast({"ev": "track", "video": video})
 
-    att = Attacher(args.profile, on_state, on_track)
+    att = Attacher(args.profile, on_state, on_track, signin_marker=args.socket + ".signin")
     ops = Ops(att, args.launcher, args.cache)
     server = Server(args.socket, ops)
     server_ref["s"] = server

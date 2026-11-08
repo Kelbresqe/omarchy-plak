@@ -401,6 +401,15 @@ Item {
     root.request("app.launch", arg, null)
   }
 
+  // Close the app window and sign in through a plain one (see bin/ytm-app
+  // --signin); the bridge reports "signing-in" until that window closes.
+  function signIn() {
+    var arg = {}
+    var b = String(root.setting("browser", "") || "")
+    if (b !== "") arg.browser = b
+    root.request("app.signin", arg, null)
+  }
+
   // ---------------------------------------------------------------- toast
 
   // One replaceable notification per track change while playing. Chromium

@@ -63,14 +63,16 @@ class Client:
 
 
 class Base(unittest.TestCase):
+    launcher = "/bin/true"
+
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.profile = os.path.join(self.tmp, "profile")
         self.sockpath = os.path.join(self.tmp, "b.sock")
         self.browser = FakeBrowser(self.profile)
-        env = dict(os.environ, YTM_POLL_MS="100")
+        env = dict(os.environ, YTM_POLL_MS="100", YTM_CLOSE_WAIT_S="0.5")
         self.proc = subprocess.Popen([sys.executable, BRIDGE, "--socket", self.sockpath, "--profile", self.profile,
-                                      "--launcher", "/bin/true", "--cache", os.path.join(self.tmp, "cache")], env=env, stderr=subprocess.PIPE)
+                                      "--launcher", self.launcher, "--cache", os.path.join(self.tmp, "cache")], env=env, stderr=subprocess.PIPE)
         for _ in range(50):
             if os.path.exists(self.sockpath):
                 break
@@ -192,6 +194,64 @@ class BridgeTest(Base):
         c = Client(self.sockpath)
         r = c.call("app.launch")
         self.assertTrue(r["ok"])
+
+    def test_signin_marker_reads_as_signing_in(self):
+        c = Client(self.sockpath)
+        self.wait_state(c, "no-app")
+        marker = self.sockpath + ".signin"
+        with open(marker, "w") as f:
+            f.write("%d\n" % os.getpid())          # a live pid: sign-in in progress
+        self.wait_state(c, "signing-in")
+        with open(marker, "w") as f:
+            f.write("999999999\n")                  # no such process: stale marker
+        self.wait_state(c, "no-app")
+
+
+class SigninTest(Base):
+    """app.signin closes the app over DevTools, then hands over to
+    `ytm-app --signin --marker <socket>.signin`."""
+
+    def setUp(self):
+        self.rec_dir = tempfile.mkdtemp()
+        self.rec = os.path.join(self.rec_dir, "args")
+        self.launcher = os.path.join(self.rec_dir, "launcher")
+        with open(self.launcher, "w") as f:
+            f.write("#!/bin/sh\nprintf '%%s\\n' \"$@\" > '%s'\n" % self.rec)
+        os.chmod(self.launcher, 0o755)
+        super().setUp()
+
+    def launched_with(self, timeout=3):
+        end = time.time() + timeout
+        while time.time() < end:
+            if os.path.exists(self.rec):
+                with open(self.rec) as f:
+                    return f.read().split("\n")[:-1]
+            time.sleep(0.05)
+        return None
+
+    def test_signin_closes_app_and_hands_over(self):
+        c = Client(self.sockpath)
+        self.browser.write_port_file()
+        self.wait_state(c, "ready")
+        r = c.call("app.signin", browser="google-chrome-stable")
+        self.assertTrue(r["ok"] and r["started"], r)
+        self.assertIn("Browser.close", self.browser.methods)
+        self.assertEqual(self.launched_with(), ["--signin", "--marker", self.sockpath + ".signin",
+                                                "--browser", "google-chrome-stable"])
+
+    def test_signin_refused_while_profile_is_busy(self):
+        c = Client(self.sockpath)
+        # A live process holds the profile and will not quit.
+        os.symlink("host-%d" % os.getpid(), os.path.join(self.profile, "SingletonLock"))
+        r = c.call("app.signin")
+        self.assertEqual((r["ok"], r["started"], r["reason"]), (True, False, "busy"))
+        self.assertIsNone(self.launched_with(timeout=0.5))
+        self.assertFalse(os.path.exists(self.sockpath + ".signin"))
+
+    def test_signin_rejects_hostile_browser(self):
+        c = Client(self.sockpath)
+        self.assertEqual(c.call("app.signin", browser="brave; touch /tmp/x")["error"], "bad-request")
+        self.assertIsNone(self.launched_with(timeout=0.5))
 
 
 class OpsTest(Base):

@@ -54,5 +54,17 @@ expected="$fake/chromium
 echo "$out" | grep -q 9222 && bad "fixed port present" || ok
 [ -d "$YTM_PROFILE_DIR" ] && [ "$(stat -c %a "$YTM_PROFILE_DIR")" = "700" ] && ok || bad "profile dir not 0700"
 
+# 6. --signin: same profile, Google's sign-in page, and no debug port
+reset; stub chromium; xdg chromium.desktop
+out=$(run --signin --marker "$tmp/marker")
+expected="$fake/chromium
+--user-data-dir=$YTM_PROFILE_DIR
+--no-first-run
+--no-default-browser-check
+https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fmusic.youtube.com%2F"
+[ "$out" = "$expected" ] && ok || { bad "signin flags"; diff <(echo "$expected") <(echo "$out"); }
+echo "$out" | grep -q -- '--remote-debugging' && bad "signin has debug port" || ok
+[ -e "$tmp/marker" ] && bad "--print wrote the marker" || ok
+
 echo "test-app-launch: $pass passed, $fail failed"
 [ $fail -eq 0 ]

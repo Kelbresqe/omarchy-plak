@@ -6,20 +6,39 @@
 # anyway). Port 0 makes Chromium pick a free loopback port and write it to
 # <profile>/DevToolsActivePort, which is the only place the bridge reads it.
 #
-#   ytm-app [--browser NAME] [--print]
+#   ytm-app [--browser NAME] [--print] [--signin [--marker FILE]]
 #     --print   show the argv instead of launching (tests)
+#     --signin  Google refuses to sign in a browser that is under remote
+#               control ("This browser or app may not be secure"), which the
+#               app window always is. So open a plain window on the same
+#               profile at Google's sign-in page, without the debug port and
+#               with the address bar showing, wait for the user to close it,
+#               then launch the app as usual. The session stays in the profile.
+#     --marker  while signing in, FILE holds this script's pid so the bridge
+#               can report "signing-in" instead of "not open"
 #   exit 3      no Chromium-family browser found
+#   exit 4      --signin, but a browser is already running on the profile
 set -euo pipefail
 
 want=""
 print=0
+signin=0
+marker=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --browser) want="${2:-}"; shift 2 ;;
     --print) print=1; shift ;;
+    --signin) signin=1; shift ;;
+    --marker) marker="${2:-}"; shift 2 ;;
     *) echo "ytm-app: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+# Claim the marker first, so every way out of a sign-in clears it.
+if [ "$signin" -eq 1 ] && [ "$print" -eq 0 ] && [ -n "$marker" ]; then
+  printf '%s\n' "$$" > "$marker"
+  trap 'rm -f "$marker"' EXIT
+fi
 
 # Candidates are executable *names*; the grammar refuses anything that is
 # not a plain name so a setting can never smuggle arguments in.
@@ -64,6 +83,46 @@ exe=$(command -v "$pick")
 profile="${YTM_PROFILE_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/tiertek.ytm/profile}"
 mkdir -p "$profile"
 chmod 700 "$profile"
+
+if [ "$signin" -eq 1 ]; then
+  argv=(
+    "$exe"
+    "--user-data-dir=$profile"
+    --no-first-run
+    --no-default-browser-check
+    "https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fmusic.youtube.com%2F"
+  )
+  if [ "$print" -eq 1 ]; then
+    printf '%s\n' "${argv[@]}"
+    exit 0
+  fi
+  # Chromium's profile lock is a symlink to "<host>-<pid>". If that browser
+  # is alive (the app window, say), a second launch would only open a window
+  # inside it, under the debug port again.
+  lock="$profile/SingletonLock"
+  if [ -L "$lock" ]; then
+    owner=$(readlink "$lock"); owner=${owner##*-}
+    if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
+      echo "ytm-app: the profile is in use by pid $owner; close TekTube's window first" >&2
+      exit 4
+    fi
+  fi
+  # A port file left behind by the app would point the bridge at a dead port.
+  rm -f "$profile/DevToolsActivePort"
+  if command -v uwsm-app >/dev/null 2>&1; then
+    setsid uwsm-app -- "${argv[@]}" >/dev/null 2>&1 || true
+  else
+    setsid "${argv[@]}" >/dev/null 2>&1 &
+  fi
+  # Wait for the window to come up (30 s), then for it to close (1 h).
+  for _ in $(seq 1 60); do [ -L "$lock" ] && break; sleep 0.5; done
+  for _ in $(seq 1 3600); do [ -L "$lock" ] || break; sleep 1; done
+  if [ -L "$lock" ]; then exit 0; fi       # still open after an hour: leave it be
+  relaunch=("$0")
+  if [ -n "$want" ]; then relaunch+=(--browser "$want"); fi
+  if [ -n "$marker" ]; then rm -f "$marker"; trap - EXIT; fi
+  exec "${relaunch[@]}"
+fi
 
 argv=(
   "$exe"

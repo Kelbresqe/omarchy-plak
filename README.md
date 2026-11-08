@@ -16,10 +16,10 @@ omarchy plugin add https://github.com/TIerTek/omarchy-tektube.git --enable
 ```
 
 1. Click the new **TekTube** pill in the bar → **Open YouTube Music**.
-2. Sign in with your Google account in the window that opens (a normal login;
-   it keeps its own browser profile).
-3. That's it. The panel notices the sign-in, loads your Home and library, and
-   the window tucks itself away in a special workspace.
+2. The panel says you're not signed in → **Sign in with Google**. A normal
+   browser window opens on Google's sign-in page. Sign in, then close it.
+3. That's it. TekTube reopens by itself, signed in, loads your Home and
+   library, and the window tucks itself away in a special workspace.
 
 Needs a Chromium-family browser (Chrome, Brave, Chromium, Vivaldi, Edge) —
 nothing else to install. Premium accounts get ad-free playback; media keys
@@ -85,9 +85,16 @@ omarchy bar move tiertek.ytm --section center
 ### First run
 
 Click the pill, then **Open YouTube Music**. A YouTube Music window opens
-with its own browser profile — sign in with your Google account as you would
-anywhere. The panel notices the sign-in on its own and loads your library.
-You will not be asked again; the session lives in that profile.
+with its own browser profile. While you're signed out, the panel offers
+**Sign in with Google**.
+
+Google won't let you sign in from the app window itself ("This browser or
+app may not be secure") because the plugin drives that window over the
+DevTools port. So **Sign in with Google** closes it and opens a normal
+window on the same profile, without the debug port and with the address bar
+showing `accounts.google.com`. Sign in there and close the window. TekTube
+reopens the app on its own, now signed in, and the panel loads your library.
+You won't be asked again; the session lives in that profile.
 
 The window is then moved to the special workspace `ytm` so it stays out of
 your way. Bring it back with the ↗ button in the panel, `Super+Shift+M`
@@ -183,7 +190,8 @@ that fixes it:
 | *Starting the bridge…* | the shell is starting `ytm-bridge`; give it a second. If it stays, `journalctl --user -f` shows `[tiertek.ytm]` lines. |
 | *YouTube Music is not open* | no app window. Click **Open YouTube Music**. |
 | *Connecting to YouTube Music…* | the window exists, the page is still loading. |
-| *Sign in to YouTube Music in its window* | signed out; the window is shown for you. |
+| *Not signed in to YouTube Music* | signed out. Click **Sign in with Google** (see **First run**). |
+| *Sign in in the Google window, then close it…* | the plain sign-in window is open. Once you close it, TekTube reopens. |
 | *YouTube changed something — playback still works* | a response shape moved. Transport keeps working over MPRIS; playlists come from the last good snapshot. Please open an issue with the endpoint name from the journal. |
 
 If the pill shows nothing at all, check the plugin is enabled:
