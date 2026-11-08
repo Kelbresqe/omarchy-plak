@@ -465,6 +465,7 @@ Item {
 
   function launchApp() {
     root.quitRequested = false
+    root.holdNextWindow(true)
     var arg = {}
     var b = String(root.setting("browser", "") || "")
     if (b !== "") arg.browser = b
@@ -562,6 +563,9 @@ Item {
       root.lastRelaunchMs = Date.now()
       root.launchApp()
     }
+    // ytm-app --signin relaunches the app window on its own once the
+    // sign-in window closes; have the rule ready for it.
+    if (root.app === "signing-in") root.holdNextWindow(true)
     root.wasReady = root.app === "ready" || (root.wasReady && root.app === "attaching")
   }
   property bool wasReady: false
@@ -634,8 +638,32 @@ Item {
   // that is on a normal workspace, so a user who dragged it somewhere on
   // purpose is left alone after that first time.
   property bool parkedOnce: false
+  // A named Hyprland rule that maps the app window straight onto
+  // special:ytm, silent, unfocused and without animation, so a launch no
+  // longer flashes it on screen before the move below (Solfa does the same
+  // with a permanent rule). Here it is only enabled around a launch and
+  // switched off once the window is up (or after a minute): a permanent rule
+  // would also hide a YouTube Music web app installed in the user's own
+  // browser, whose window class is the same. The plain sign-in window is a
+  // normal browser window and never matches. Kept in a Lua global so
+  // repeated launches reuse one rule.
+  readonly property string ruleClass: "^[a-z-]+-music\\.youtube\\.com__-Default$"
+  function holdNextWindow(on) {
+    if (!root.setting("parkWindow", true)) return
+    var lua = on
+      ? "local r = _G.__tiertek_ytm_rule; if r then r:set_enabled(true) else _G.__tiertek_ytm_rule = hl.window_rule({ "
+        + "name = [[tiertek-ytm]], match = { class = [[" + root.ruleClass + "]] }, workspace = [[special:ytm silent]], "
+        + "no_initial_focus = true, no_anim = true, focus_on_activate = false, suppress_event = [[activate activatefocus]] }) end"
+      : "local r = _G.__tiertek_ytm_rule; if r then r:set_enabled(false) end"
+    Quickshell.execDetached(["hyprctl", "eval", lua])
+    if (on) ruleTimeout.restart()
+    else ruleTimeout.stop()
+  }
+  Timer { id: ruleTimeout; interval: 60000; repeat: false; onTriggered: root.holdNextWindow(false) }
+
   onAppWindowChanged: {
     if (!root.appWindow) { root.parkedOnce = false; return }
+    if (ruleTimeout.running) root.holdNextWindow(false)
     if (root.parkedOnce || !root.setting("parkWindow", true)) return
     var ws = root.appWindow.lastIpcObject && root.appWindow.lastIpcObject.workspace ? root.appWindow.lastIpcObject.workspace : {}
     if (String(ws.name || "").indexOf("special:") === 0) { root.parkedOnce = true; return }
