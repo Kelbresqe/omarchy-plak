@@ -72,8 +72,10 @@ Item {
     if (root.app === "ready" && was !== "ready") {
       root.loadLibrary()
       root.loadHome()
+      root.loadVolume()
       root.onTrack(root.video)
     }
+    if (root.app !== "ready") root.volume = -1
     if (root.video !== wasVideo) root.onTrack(root.video)
   }
 
@@ -121,8 +123,27 @@ Item {
   function next() { if (player && player.canGoNext) player.next() }
   function previous() { if (player && player.canGoPrevious) player.previous() }
   function seekTo(seconds) { if (player && player.canSeek) player.position = seconds }
-  function setVolume(v) { if (player && player.volumeSupported) player.volume = Math.max(0, Math.min(1, v)) }
-  function nudgeVolume(delta) { if (player && player.volumeSupported) setVolume(player.volume + delta) }
+
+  // Volume, 0–1. Chromium's MPRIS player advertises Volume and accepts a
+  // write, but ignores it and always reads back 1.0 — so volume goes through
+  // the page's own slider via the bridge instead. -1 until the page answers.
+  property real volume: -1
+  readonly property bool volumeSupported: root.ready && root.volume >= 0
+
+  function loadVolume() {
+    root.request("volume.get", null, function(m) {
+      if (m.ok && m.data && typeof m.data.volume === "number") root.volume = Math.max(0, Math.min(1, m.data.volume / 100))
+    })
+  }
+  function setVolume(v) {
+    if (!root.volumeSupported) return
+    v = Math.max(0, Math.min(1, v))
+    root.volume = v                                     // optimistic
+    root.request("volume.set", { volume: Math.round(v * 100) }, function(m) { if (!m.ok) root.loadVolume() })
+  }
+  function nudgeVolume(delta) { if (root.volumeSupported) setVolume(root.volume + delta) }
+  // Pick up a change made in the YouTube Music window itself.
+  onPanelOpenChanged: if (root.panelOpen && root.ready) root.loadVolume()
 
   // ---------------------------------------------------------------- bridge process
 

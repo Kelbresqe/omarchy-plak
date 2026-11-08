@@ -226,6 +226,18 @@ class OpsTest(Base):
         self.assertEqual(self.last_call(), ("search", {"q": "rick astley"}))
         self.assertEqual(c.call("now")["data"]["video"], "dQw4w9WgXcQ")
 
+    def test_volume_forwards_validated_level(self):
+        c = self.ready()
+        self.browser.canned.update({"volume.get": {"volume": 40}, "volume.set": {"volume": 65}})
+        self.assertEqual(c.call("volume.get")["data"], {"volume": 40})
+        self.assertEqual(self.last_call(), ("volume.get", {}))
+        self.assertEqual(c.call("volume.set", volume=65)["data"], {"volume": 65})
+        self.assertEqual(self.last_call(), ("volume.set", {"volume": 65}))
+        n = len(self.browser.calls)
+        for bad in (-1, 101, 0.5, "50", True, None):
+            self.assertEqual(c.call("volume.set", volume=bad)["error"], "bad-request", bad)
+        self.assertEqual(len(self.browser.calls), n)   # nothing invalid reached the page
+
     def test_play_forwards_shuffle_and_follows_up(self):
         c = self.ready()
         self.browser.canned.update({"play": {"navigated": True}, "player.shuffle": {"shuffled": True}})

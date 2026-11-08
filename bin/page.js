@@ -95,6 +95,15 @@
 
   function playerBar() { return document.querySelector("ytmusic-player-bar") }
 
+  // The player bar's own volume slider (0–100). Driving it rather than
+  // movie_player.setVolume() keeps the site's loudness curve, keeps its UI in
+  // step, and is what the site remembers across reloads (the `volume` field
+  // of its PREF cookie); setVolume() alone is forgotten on the next track.
+  function volumeSlider() {
+    const bar = playerBar()
+    return bar ? bar.querySelector("#volume-slider") : null
+  }
+
   // Polymer elements expose their renderer JSON as `.data`; the queue items
   // carry the same playlistPanelVideoRenderer shape the `next` endpoint uses,
   // so the parser in Ytm.js handles both without knowing which one it got.
@@ -246,6 +255,22 @@
 
     async search(arg) {
       return innertube("search", { query: arg.q })
+    },
+
+    // Volume in slider units, 0–100. Chromium's MPRIS player accepts a Volume
+    // write and ignores it (it always reads back 1.0), so this is the only
+    // way the shell can change it. `volume` is null while the bar is not up.
+    async "volume.get"() {
+      const s = volumeSlider()
+      return { volume: s ? Number(s.value) : null }
+    },
+
+    async "volume.set"(arg) {
+      const s = volumeSlider()
+      if (!s) return { volume: null }
+      s.value = arg.volume
+      s.dispatchEvent(new CustomEvent("change", { bubbles: true }))
+      return { volume: Number(s.value) }
     },
   }
 

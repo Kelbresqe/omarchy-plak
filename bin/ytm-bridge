@@ -611,6 +611,15 @@ class Ops:
             raise BadRequest("q")
         return {"data": self._page("search", {"q": q})}
 
+    def op_volume_get(self, arg):
+        return {"data": self._page("volume.get", {})}
+
+    def op_volume_set(self, arg):
+        v = arg.get("volume")
+        if not isinstance(v, int) or isinstance(v, bool) or v < 0 or v > 100:
+            raise BadRequest("volume")
+        return {"data": self._page("volume.set", {"volume": v})}
+
     def op_art(self, arg):
         """Download an artwork URL into the cache and return its path, for
         notify-send, which needs a file. Only https://*.googleusercontent.com

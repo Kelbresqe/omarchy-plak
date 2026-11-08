@@ -131,14 +131,14 @@ Column {
         text: "\u{F057E}"
         color: Color.foreground; opacity: 0.6
         font.family: root.family; font.pixelSize: Style.font.icon
-        visible: root.player && root.player.volumeSupported
+        visible: root.svc && root.svc.volumeSupported
       }
       PanelSlider {
         width: Style.space(70)
         anchors.verticalCenter: parent.verticalCenter
         bar: root.bar
-        visible: root.player && root.player.volumeSupported
-        value: root.player ? root.player.volume : 0
+        visible: root.svc && root.svc.volumeSupported
+        value: root.svc && root.svc.volume >= 0 ? root.svc.volume : 0
         onMoved: function(v) { if (root.svc) root.svc.setVolume(v) }
       }
       PanelActionButton {
