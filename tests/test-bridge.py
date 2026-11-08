@@ -248,6 +248,15 @@ class SigninTest(Base):
         self.assertIsNone(self.launched_with(timeout=0.5))
         self.assertFalse(os.path.exists(self.sockpath + ".signin"))
 
+    def test_quit_closes_app_over_devtools(self):
+        c = Client(self.sockpath)
+        self.browser.write_port_file()
+        self.wait_state(c, "ready")
+        r = c.call("app.quit")
+        self.assertEqual((r["ok"], r["closed"]), (True, True))
+        self.assertIn("Browser.close", self.browser.methods)
+        self.assertIsNone(self.launched_with(timeout=0.3))   # quitting never relaunches
+
     def test_signin_rejects_hostile_browser(self):
         c = Client(self.sockpath)
         self.assertEqual(c.call("app.signin", browser="brave; touch /tmp/x")["error"], "bad-request")
@@ -473,6 +482,59 @@ class WebSocketLimitTest(unittest.TestCase):
         ws = bridge.WebSocket(srv.url())
         self.assertEqual(ws.recv_text(), body.decode())
         ws.close()
+
+
+class SelfWatchTest(unittest.TestCase):
+    """The daemon exits on its own when its code changes or when a newer
+    daemon takes over the socket, and never unlinks a socket it lost."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.bin = os.path.join(self.tmp, "bin")
+        os.mkdir(self.bin)
+        for name in ("ytm-bridge", "page.js"):
+            with open(os.path.join(ROOT, "bin", name), "rb") as src, open(os.path.join(self.bin, name), "wb") as dst:
+                dst.write(src.read())
+        self.sockpath = os.path.join(self.tmp, "b.sock")
+        self.procs = []
+
+    def tearDown(self):
+        for p in self.procs:
+            if p.poll() is None:
+                p.kill()
+                p.wait(3)
+
+    def start(self):
+        env = dict(os.environ, YTM_POLL_MS="100", YTM_SELF_CHECK_S="0.2")
+        p = subprocess.Popen([sys.executable, os.path.join(self.bin, "ytm-bridge"), "--socket", self.sockpath,
+                              "--profile", os.path.join(self.tmp, "profile"), "--launcher", "/bin/true",
+                              "--cache", os.path.join(self.tmp, "cache")], env=env, stderr=subprocess.DEVNULL)
+        self.procs.append(p)
+        end = time.time() + 5
+        while time.time() < end:
+            try:
+                if Client(self.sockpath).call("state")["ok"]:
+                    return p
+            except OSError:
+                pass
+            time.sleep(0.05)
+        self.fail("bridge never answered")
+
+    def test_exits_when_code_changes(self):
+        p = self.start()
+        time.sleep(0.3)
+        page = os.path.join(self.bin, "page.js")
+        st = os.stat(page)
+        os.utime(page, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
+        self.assertEqual(p.wait(5), 0)
+        self.assertFalse(os.path.exists(self.sockpath))
+
+    def test_older_daemon_yields_the_socket(self):
+        old = self.start()
+        new = self.start()                        # rebinds the same path
+        self.assertEqual(old.wait(5), 0)
+        self.assertIsNone(new.poll())
+        self.assertTrue(Client(self.sockpath).call("state")["ok"])   # the old one did not unlink it
 
 
 class CheckIdTest(unittest.TestCase):

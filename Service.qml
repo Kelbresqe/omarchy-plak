@@ -143,7 +143,13 @@ Item {
     root.volume = v                                     // optimistic
     root.request("volume.set", { volume: Math.round(v * 100) }, function(m) { if (!m.ok) root.loadVolume() })
   }
-  function nudgeVolume(delta) { if (root.volumeSupported) setVolume(root.volume + delta) }
+  // Bar wheel and the volume keys. Shows Omarchy's OSD with the media icon,
+  // so it reads as the music's level rather than the system volume.
+  function nudgeVolume(delta) {
+    if (!root.volumeSupported) return
+    root.setVolume(root.volume + delta)
+    Quickshell.execDetached(["omarchy-osd", "-i", "media", "-p", String(Math.round(root.volume * 100))])
+  }
   // Repeat: NONE / ALL / ONE, read from and set through the page's player bar
   // (Chromium's MPRIS player has no LoopStatus). "" until the page answers.
   property string repeatMode: ""
@@ -395,15 +401,26 @@ Item {
   }
 
   function launchApp() {
+    root.quitRequested = false
     var arg = {}
     var b = String(root.setting("browser", "") || "")
     if (b !== "") arg.browser = b
     root.request("app.launch", arg, null)
   }
 
+  // Close the app window to free its memory (~700 MB measured); the sign-in
+  // stays in the profile, so launchApp() brings it back signed in. Holds off
+  // autoRelaunch until the next launch.
+  property bool quitRequested: false
+  function quitApp() {
+    root.quitRequested = true
+    root.request("app.quit", null, null)
+  }
+
   // Close the app window and sign in through a plain one (see bin/ytm-app
   // --signin); the bridge reports "signing-in" until that window closes.
   function signIn() {
+    root.quitRequested = false
     var arg = {}
     var b = String(root.setting("browser", "") || "")
     if (b !== "") arg.browser = b
@@ -478,7 +495,7 @@ Item {
   property double lastRelaunchMs: 0
   onAppChanged: {
     if (root.app === "no-app" && root.wasReady && root.setting("autoRelaunch", false)
-        && Date.now() - root.lastRelaunchMs > 60000) {
+        && !root.quitRequested && Date.now() - root.lastRelaunchMs > 60000) {
       root.lastRelaunchMs = Date.now()
       root.launchApp()
     }

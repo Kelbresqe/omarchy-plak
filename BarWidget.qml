@@ -79,6 +79,11 @@ BarWidget {
     function reveal(): void { if (root.svc) root.svc.revealApp() }
     function hide(): void { if (root.svc) root.svc.hideApp() }
     function launch(): void { if (root.svc) root.svc.launchApp() }
+    function quit(): void { if (root.svc) root.svc.quitApp() }
+    function volumeUp(): void { if (root.svc) root.svc.nudgeVolume(0.05) }
+    function volumeDown(): void { if (root.svc) root.svc.nudgeVolume(-0.05) }
+    function repeat(): void { if (root.svc) root.svc.cycleRepeat() }
+    function shuffle(): void { if (root.svc) root.svc.toggleShuffle() }
   }
 
   Row {

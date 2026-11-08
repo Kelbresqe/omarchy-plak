@@ -174,6 +174,13 @@ Column {
         fontFamily: root.family
         onClicked: if (root.svc) root.svc.revealApp()
       }
+      PanelActionButton {
+        iconText: "\u{F0425}"
+        tooltipText: "Close YouTube Music (frees its memory; you stay signed in)"
+        fontFamily: root.family
+        enabled: root.svc && root.svc.ready
+        onClicked: if (root.svc) root.svc.quitApp()
+      }
     }
   }
 }

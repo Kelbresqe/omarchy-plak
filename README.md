@@ -97,8 +97,12 @@ reopens the app on its own, now signed in, and the panel loads your library.
 You won't be asked again; the session lives in that profile.
 
 The window is then moved to the special workspace `ytm` so it stays out of
-your way. Bring it back with the ↗ button in the panel, `Super+Shift+M`
-(below), or `omarchy-shell`'s IPC — see **Controls**.
+your way. Bring it back with the ↗ button in the panel, or with
+`bin/ytm reveal` (see **Controls**).
+
+When you aren't listening, the ⏻ button in the panel closes the YouTube
+Music window and frees its memory (about 700 MB on Chrome). You stay signed
+in: **Open YouTube Music** brings it back.
 
 ## Controls
 
@@ -107,7 +111,7 @@ your way. Bring it back with the ↗ button in the panel, `Super+Shift+M`
 | Left click | open / close the panel |
 | Middle click | play / pause |
 | Right click | next track |
-| Scroll | volume |
+| Scroll | music volume (shown on Omarchy's OSD) |
 
 | In the panel | |
 |---|---|
@@ -128,16 +132,37 @@ Desktop media keys work through MPRIS without any binding.
 
 ### Keybindings (optional)
 
-Append `hypr/ytm.lua` from the plugin directory to `~/.config/hypr/bindings.lua`
-and run `omarchy restart hyprland`. It binds `Super+M` (panel),
-`Super+Shift+M` (show the window) and `Super+Alt+M` (lyrics). The same verbs
-are available from any script through `bin/ytm`:
+Append `hypr/ytm.lua` from the plugin directory to `~/.config/hypr/bindings.lua`.
+Hyprland reloads it on save; `hyprctl configerrors` should print nothing.
+Everything sits on M, and `Super+M` itself stays Omarchy's "minimize to the
+dock":
+
+| key | |
+|---|---|
+| `Super+Shift+M` | open / close the panel |
+| `Super+Alt+M` | play / pause |
+| `Super+Ctrl+M` / `Super+Ctrl+Shift+M` | next / previous track |
+| `Super+Ctrl+↑` / `Super+Ctrl+↓` | music volume up / down (hold to repeat; shown on Omarchy's OSD) |
+
+The keyboard's volume keys keep changing the system volume. The same verbs,
+and a few more, are available from any script through `bin/ytm`:
 
 ```sh
 ~/.config/omarchy/plugins/tiertek.ytm/bin/ytm toggle
 ~/.config/omarchy/plugins/tiertek.ytm/bin/ytm view lyrics
 ~/.config/omarchy/plugins/tiertek.ytm/bin/ytm playPause
+~/.config/omarchy/plugins/tiertek.ytm/bin/ytm volumeUp     # or volumeDown
+~/.config/omarchy/plugins/tiertek.ytm/bin/ytm repeat       # or shuffle
+~/.config/omarchy/plugins/tiertek.ytm/bin/ytm quit         # close the YouTube Music window
 ```
+
+### Updating
+
+`omarchy plugin update tiertek.ytm` is enough. The shell hot-reloads the QML,
+and `ytm-bridge` exits once it sees that its own code (`bin/ytm-bridge` or
+`bin/page.js`) has changed, so the shell starts a fresh bridge within a
+couple of seconds. A bridge whose socket a newer one has taken over exits
+too.
 
 ## Settings
 

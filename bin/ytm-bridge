@@ -49,8 +49,12 @@ MAX_VERSION_JSON = 64 * 1024       # GET /json/version body
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 POLL_MS = int(os.environ.get("YTM_POLL_MS", "1000"))
-# How long app.signin waits for the app window to quit before giving up.
+# How long app.signin / app.quit wait for the app window to quit.
 CLOSE_WAIT_S = float(os.environ.get("YTM_CLOSE_WAIT_S", "10"))
+# How often the daemon checks whether its code changed or its socket was
+# taken over (see watch_self).
+SELF_CHECK_S = float(os.environ.get("YTM_SELF_CHECK_S", "2"))
+CODE_FILES = (os.path.abspath(__file__), os.path.join(HERE, "page.js"))
 
 
 def log(*parts):
@@ -560,6 +564,11 @@ class Ops:
             raise BadRequest("launcher: %s" % e)
         return {"launched": True}
 
+    def op_app_quit(self, arg):
+        """Close the app window to free its memory (the session stays in the
+        profile; app.launch brings it back signed in)."""
+        return {"closed": self.att.close_browser(CLOSE_WAIT_S)}
+
     def op_app_signin(self, arg):
         """Sign in without the debug port. Google refuses to sign in a browser
         under remote control ("This browser or app may not be secure"), so
@@ -811,6 +820,34 @@ def run_request(ops, msg):
 
 # ---------------------------------------------------------------- server
 
+def code_stamp():
+    out = []
+    for p in CODE_FILES:
+        try:
+            out.append(os.stat(p).st_mtime_ns)
+        except OSError:
+            out.append(0)
+    return tuple(out)
+
+
+def watch_self(server, on_exit):
+    """Exit (so the shell's supervisor starts a fresh daemon) when this file or
+    page.js changes, e.g. after `omarchy plugin update`: the shell's hot reload
+    reloads QML but never restarts a running bridge, which then keeps serving
+    old code. Also exit when a newer daemon has taken over the socket path
+    (Server unlinks and rebinds it), so no idle daemon is left behind."""
+    stamp = code_stamp()
+    while True:
+        time.sleep(SELF_CHECK_S)
+        if code_stamp() != stamp:
+            time.sleep(1)                    # let a multi-file update settle
+            on_exit("code changed")
+            return
+        if not server.owns_path():
+            on_exit("socket taken over by a newer daemon")
+            return
+
+
 class Server:
     def __init__(self, path, ops):
         self.path = path
@@ -828,7 +865,14 @@ class Server:
         finally:
             os.umask(old)
         os.chmod(path, 0o600)
+        self.inode = os.stat(path).st_ino
         self.sock.listen(8)
+
+    def owns_path(self):
+        try:
+            return os.stat(self.path).st_ino == self.inode
+        except OSError:
+            return False
 
     def serve(self):
         while True:
@@ -883,13 +927,17 @@ class Server:
                 pass
 
     def close(self):
+        # Unlink the path only while it is still ours; a newer daemon may
+        # have rebound it.
+        owned = self.owns_path()
         try:
             self.sock.close()
         finally:
-            try:
-                os.unlink(self.path)
-            except OSError:
-                pass
+            if owned:
+                try:
+                    os.unlink(self.path)
+                except OSError:
+                    pass
 
 
 # ---------------------------------------------------------------- main
@@ -944,6 +992,14 @@ def main():
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
+
+    def self_exit(reason):
+        log(reason + "; exiting so the shell starts a fresh bridge")
+        att.stop()
+        server.close()
+        os._exit(0)
+
+    threading.Thread(target=watch_self, args=(server, self_exit), daemon=True).start()
     log("listening on", args.socket)
     server.serve()
 
