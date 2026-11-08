@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
 """ytm-bridge: the link between the Omarchy shell and a YouTube Music window.
 
-Attaches to the Chromium app window that bin/ytm-app launched (via the
-DevTools port Chromium writes into the dedicated profile), and serves a
-JSON-lines protocol on a private unix socket. Every authenticated request is
+Attaches to the Chromium app window that bin/ytm-app launched (through
+bin/ytm-cdp, which holds the browser's DevTools pipe and relays it on a 0600
+socket in the dedicated profile), and serves a JSON-lines protocol on a
+private unix socket. Every authenticated request is
 executed *inside the page* by the site's own session; this process never sees
 a cookie or a token, only the JSON that comes back.
 
     ytm-bridge [--socket PATH] [--profile DIR] [--launcher PATH]   daemon
     ytm-bridge --once OP [JSON]                                    one request, print, exit
+                                                                   (only while no daemon is attached:
+                                                                   the relay takes one client at a time)
     ytm-bridge --check-id ID                                       grammar check, exit 0/1
 
 Standard library only. Python 3.9+.
 """
 import argparse
-import base64
 import json
 import os
 import queue
 import re
-import secrets
 import signal
 import socket
-import struct
 import subprocess
 import sys
 import threading
@@ -34,7 +34,8 @@ import urllib.request
 VALID_ID = re.compile(r"^[A-Za-z0-9_-]{2,64}$")
 MAX_QUERY = 200
 PAGE_URL_PREFIX = "https://music.youtube.com"
-WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+# bin/ytm-cdp's socket, inside the profile directory (see bin/ytm-app).
+RELAY_NAME = "Plak-DevTools.sock"
 
 # Everything read from the browser endpoint is bounded, because what comes
 # back is shaped by the remote page. Measured on a live account 2026-09-20:
@@ -42,10 +43,7 @@ WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 # 10-page `playlist.items` at 1.08 MB. Anything past these caps is not a
 # bigger answer, it is a broken or hostile peer, and the connection is
 # closed rather than buffered.
-MAX_HANDSHAKE = 16 * 1024          # HTTP 101 response, headers included
-MAX_FRAME = 16 * 1024 * 1024       # one WebSocket frame's declared length
-MAX_MESSAGE = 16 * 1024 * 1024     # a fragmented message, all pieces together
-MAX_VERSION_JSON = 64 * 1024       # GET /json/version body
+MAX_MESSAGE = 16 * 1024 * 1024     # one DevTools message
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 POLL_MS = int(os.environ.get("YTM_POLL_MS", "1000"))
@@ -75,121 +73,58 @@ def xdg(var, default):
     return os.environ.get(var) or os.path.expanduser(default)
 
 
-# ---------------------------------------------------------------- websocket
+# ---------------------------------------------------------------- relay socket
 
-class WebSocketClosed(Exception):
+class PipeClosed(Exception):
     pass
 
 
-class WebSocket:
-    """Minimal RFC 6455 client: text frames, ping/pong, close, fragmentation."""
+class DevToolsSocket:
+    """A connection to bin/ytm-cdp: DevTools messages as NUL-terminated JSON,
+    the framing Chromium uses on --remote-debugging-pipe."""
 
-    def __init__(self, url, timeout=5):
-        m = re.match(r"^ws://([^/:]+):(\d+)(/.*)?$", url)
-        if not m:
-            raise ValueError("bad ws url")
-        host, port, path = m.group(1), int(m.group(2)), m.group(3) or "/"
-        self.sock = socket.create_connection((host, port), timeout=timeout)
-        key = base64.b64encode(secrets.token_bytes(16)).decode()
-        req = ("GET %s HTTP/1.1\r\nHost: %s:%d\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-               "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n" % (path, host, port, key))
-        self.sock.sendall(req.encode())
-        head = b""
-        while b"\r\n\r\n" not in head:
-            if len(head) >= MAX_HANDSHAKE:
-                self._fail("handshake too long")
-            chunk = self.sock.recv(min(4096, MAX_HANDSHAKE - len(head)))
-            if not chunk:
-                self._fail("handshake")
-            head += chunk
-        head, rest = head.split(b"\r\n\r\n", 1)
-        if b" 101" not in head.split(b"\r\n", 1)[0]:
-            self._fail("upgrade refused")
-        self.buf = rest
+    def __init__(self, path, timeout=5):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            self.sock.settimeout(timeout)
+            self.sock.connect(path)
+        except OSError:
+            self.sock.close()
+            raise
         self.sock.settimeout(None)
+        self.buf = bytearray()
         self.lock = threading.Lock()
 
     def _fail(self, why):
-        # Drop the socket outright: no close frame, the peer has already
-        # shown it cannot be trusted to read one. Reader threads see the
-        # exception; the attacher treats it like a browser restart.
-        try:
-            self.sock.close()
-        except OSError:
-            pass
-        raise WebSocketClosed(why)
+        # Drop the socket outright: the peer has shown it cannot be trusted.
+        # Reader threads see the exception; the attacher treats it like a
+        # browser restart.
+        self.close()
+        raise PipeClosed(why)
 
-    def _read(self, n):
-        # Callers bound n (a header or a length-checked payload) before
-        # asking, so the buffer never grows past a frame plus one recv.
-        while len(self.buf) < n:
+    def send_text(self, text):
+        with self.lock:
+            self.sock.sendall(text.encode() + b"\0")
+
+    def recv_text(self):
+        seen = 0
+        while True:
+            i = self.buf.find(b"\0", seen)
+            if i >= 0:
+                msg = bytes(self.buf[:i])
+                del self.buf[:i + 1]
+                return msg.decode("utf-8", "replace")
+            # Checked before every read, so the buffer never grows past the
+            # cap plus one recv.
+            if len(self.buf) > MAX_MESSAGE:
+                self._fail("message too large: over %d" % MAX_MESSAGE)
+            seen = len(self.buf)
             chunk = self.sock.recv(65536)
             if not chunk:
                 self._fail("eof")
             self.buf += chunk
-        out, self.buf = self.buf[:n], self.buf[n:]
-        return out
-
-    def send_text(self, text):
-        data = text.encode()
-        n = len(data)
-        hdr = bytes([0x81])
-        if n < 126:
-            hdr += bytes([0x80 | n])
-        elif n < 65536:
-            hdr += bytes([0x80 | 126]) + struct.pack(">H", n)
-        else:
-            hdr += bytes([0x80 | 127]) + struct.pack(">Q", n)
-        mask = secrets.token_bytes(4)
-        masked = bytes(b ^ mask[i % 4] for i, b in enumerate(data))
-        with self.lock:
-            self.sock.sendall(hdr + mask + masked)
-
-    def _send_control(self, opcode, payload=b""):
-        mask = secrets.token_bytes(4)
-        masked = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
-        with self.lock:
-            self.sock.sendall(bytes([0x80 | opcode, 0x80 | len(payload)]) + mask + masked)
-
-    def recv_text(self):
-        parts = []
-        total = 0
-        while True:
-            b0, b1 = self._read(2)
-            fin, opcode = b0 & 0x80, b0 & 0x0F
-            n = b1 & 0x7F
-            if n == 126:
-                n = struct.unpack(">H", self._read(2))[0]
-            elif n == 127:
-                n = struct.unpack(">Q", self._read(8))[0]
-            # Both checks happen on the declared length, before a byte of
-            # the payload is buffered.
-            if n > MAX_FRAME:
-                self._fail("frame too large: %d" % n)
-            if opcode < 0x8:            # data frame: part of the message
-                total += n
-                if total > MAX_MESSAGE:
-                    self._fail("message too large: %d" % total)
-            mask = self._read(4) if b1 & 0x80 else None
-            payload = self._read(n)
-            if mask:
-                payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
-            if opcode == 0x8:
-                raise WebSocketClosed("close frame")
-            if opcode == 0x9:
-                self._send_control(0xA, payload)
-                continue
-            if opcode == 0xA:
-                continue
-            parts.append(payload)
-            if fin:
-                return b"".join(parts).decode("utf-8", "replace")
 
     def close(self):
-        try:
-            self._send_control(0x8)
-        except OSError:
-            pass
         try:
             self.sock.close()
         except OSError:
@@ -205,8 +140,8 @@ class CdpError(Exception):
 class Cdp:
     """One DevTools connection. call() is synchronous; events land in a queue."""
 
-    def __init__(self, ws_url):
-        self.ws = WebSocket(ws_url)
+    def __init__(self, path):
+        self.conn = DevToolsSocket(path)
         self.pending = {}
         self.plock = threading.Lock()
         self.next_id = 0
@@ -217,7 +152,7 @@ class Cdp:
     def _reader(self):
         try:
             while True:
-                msg = json.loads(self.ws.recv_text())
+                msg = json.loads(self.conn.recv_text())
                 if "id" in msg:
                     with self.plock:
                         slot = self.pending.pop(msg["id"], None)
@@ -226,7 +161,7 @@ class Cdp:
                         slot["ev"].set()
                 else:
                     self.events.put(msg)
-        except (WebSocketClosed, OSError, ValueError):
+        except (PipeClosed, OSError, ValueError):
             pass
         finally:
             self.closed.set()
@@ -248,7 +183,7 @@ class Cdp:
         msg = {"id": mid, "method": method, "params": params or {}}
         if session:
             msg["sessionId"] = session
-        self.ws.send_text(json.dumps(msg))
+        self.conn.send_text(json.dumps(msg))
         if not slot["ev"].wait(timeout):
             with self.plock:
                 self.pending.pop(mid, None)
@@ -259,7 +194,7 @@ class Cdp:
         return reply.get("result", {})
 
     def close(self):
-        self.ws.close()
+        self.conn.close()
 
 
 # ---------------------------------------------------------------- memory
@@ -378,7 +313,6 @@ class Attacher:
         self.lock = threading.Lock()
         self.page_js = open(os.path.join(HERE, "page.js"), encoding="utf-8").read()
         self._stop = threading.Event()
-        self._port_seen = None
         threading.Thread(target=self._loop, daemon=True).start()
 
     def _set(self, state):
@@ -391,9 +325,6 @@ class Attacher:
     def stop(self):
         self._stop.set()
         self._drop()
-
-    def _port_file(self):
-        return os.path.join(self.profile, "DevToolsActivePort")
 
     # Chromium's profile lock is a symlink to "<hostname>-<pid>"; that pid is
     # what its MPRIS bus name ends with, which is how the shell tells this
@@ -446,14 +377,6 @@ class Attacher:
             time.sleep(0.1)
         return not self.browser_alive()
 
-    def _read_port(self):
-        try:
-            with open(self._port_file(), encoding="utf-8") as f:
-                lines = f.read().split("\n")
-            return int(lines[0].strip()), lines[1].strip() if len(lines) > 1 else ""
-        except (OSError, ValueError, IndexError):
-            return None
-
     def _drop(self):
         with self.lock:
             cdp, self.cdp, self.session, self.target = self.cdp, None, None, None
@@ -477,17 +400,13 @@ class Attacher:
                 time.sleep(POLL_MS / 1000.0)
 
     def _try_attach(self):
-        port = self._read_port()
-        if not port:
+        try:
+            cdp = Cdp(os.path.join(self.profile, RELAY_NAME))
+        except OSError:
+            # No relay (the app window is not running), or a stale socket
+            # left by one that was killed.
             return False
         self._set("attaching")
-        try:
-            with urllib.request.urlopen("http://127.0.0.1:%d/json/version" % port[0], timeout=3) as r:
-                ws_url = json.loads(r.read(MAX_VERSION_JSON))["webSocketDebuggerUrl"]
-            cdp = Cdp(ws_url)
-        except (OSError, ValueError, KeyError, WebSocketClosed):
-            # Stale port file from a browser that is gone.
-            return False
         try:
             cdp.call("Target.setDiscoverTargets", {"discover": True})
             if not self._attach_page(cdp):
@@ -824,7 +743,7 @@ class Ops:
         return {"closed": self.att.close_browser(CLOSE_WAIT_S)}
 
     def op_app_signin(self, arg):
-        """Sign in without the debug port. Google refuses to sign in a browser
+        """Sign in without DevTools. Google refuses to sign in a browser
         under remote control ("This browser or app may not be secure"), so
         close our app window and hand over to `ytm-app --signin`, which opens a
         plain window on the same profile, waits for the user to close it and

@@ -2,16 +2,18 @@
 # Launch YouTube Music as an app window the bridge can attach to.
 #
 # A dedicated profile keeps the user's real browser profile out of reach of
-# the debug port (and Chrome >= 136 refuses to debug the default profile
-# anyway). Port 0 makes Chromium pick a free loopback port and write it to
-# <profile>/DevToolsActivePort, which is the only place the bridge reads it.
+# DevTools (and Chrome >= 136 refuses to debug the default profile anyway).
+# DevTools runs over a pipe, not a port: bin/ytm-cdp starts the browser with
+# --remote-debugging-pipe and relays it on <profile>/Plak-DevTools.sock (0600,
+# in the 0700 profile), which is where the bridge connects. A TCP debug port
+# would let any local user attach to the signed-in profile.
 #
 #   ytm-app [--browser NAME] [--print] [--signin [--marker FILE]]
-#     --print   show the argv instead of launching (tests)
+#     --print   show the browser's argv instead of launching (tests)
 #     --signin  Google refuses to sign in a browser that is under remote
 #               control ("This browser or app may not be secure"), which the
 #               app window always is. So open a plain window on the same
-#               profile at Google's sign-in page, without the debug port and
+#               profile at Google's sign-in page, without DevTools and
 #               with the address bar showing, wait for the user to close it,
 #               then launch the app as usual. The session stays in the profile.
 #     --marker  while signing in, FILE holds this script's pid so the bridge
@@ -116,7 +118,7 @@ if [ "$signin" -eq 1 ]; then
   fi
   # Chromium's profile lock is a symlink to "<host>-<pid>". If that browser
   # is alive (the app window, say), a second launch would only open a window
-  # inside it, under the debug port again.
+  # inside it, under DevTools again.
   lock="$profile/SingletonLock"
   if [ -L "$lock" ]; then
     owner=$(readlink "$lock"); owner=${owner##*-}
@@ -125,8 +127,6 @@ if [ "$signin" -eq 1 ]; then
       exit 4
     fi
   fi
-  # A port file left behind by the app would point the bridge at a dead port.
-  rm -f "$profile/DevToolsActivePort"
   if command -v uwsm-app >/dev/null 2>&1; then
     setsid uwsm-app -- "${argv[@]}" >/dev/null 2>&1 || true
   else
@@ -146,7 +146,7 @@ argv=(
   "$exe"
   --app=https://music.youtube.com
   "--user-data-dir=$profile"
-  --remote-debugging-port=0
+  --remote-debugging-pipe
   --autoplay-policy=no-user-gesture-required
   --no-first-run
   --no-default-browser-check
@@ -157,8 +157,9 @@ if [ "$print" -eq 1 ]; then
   exit 0
 fi
 
+relay=("$(dirname "$(readlink -f "$0")")/ytm-cdp" "$profile/Plak-DevTools.sock")
 if command -v uwsm-app >/dev/null 2>&1; then
-  exec setsid uwsm-app -- "${argv[@]}" >/dev/null 2>&1
+  exec setsid uwsm-app -- "${relay[@]}" "${argv[@]}" >/dev/null 2>&1
 else
-  setsid "${argv[@]}" >/dev/null 2>&1 &
+  setsid "${relay[@]}" "${argv[@]}" >/dev/null 2>&1 &
 fi

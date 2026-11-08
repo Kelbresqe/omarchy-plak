@@ -7,8 +7,9 @@ and cannot reach, and where a reviewer should look.
 
 | component | privilege | notes |
 |---|---|---|
-| `bin/ytm-app` | none | launches the user's browser with a **dedicated** `--user-data-dir` and `--remote-debugging-port=0` (random loopback port). With `--signin` it instead opens a plain window on the same profile at a fixed `https://accounts.google.com/ServiceLogin` URL, **without** the debug port, refuses if another live browser holds the profile, and records its own pid in `$XDG_RUNTIME_DIR/io.github.kelbresqe.plak.sock.signin` (removed on exit). No sudo, no installer, no network. |
-| `bin/ytm-bridge` | none | Python 3 standard library. Connects to `127.0.0.1:<port>` read from the profile's `DevToolsActivePort`; listens on `$XDG_RUNTIME_DIR/io.github.kelbresqe.plak.sock`, created with umask 0177 and chmod 0600. |
+| `bin/ytm-app` | none | launches the user's browser through `bin/ytm-cdp` with a **dedicated** `--user-data-dir` (made 0700) and `--remote-debugging-pipe`. No TCP debug port is ever opened. With `--signin` it instead opens a plain window on the same profile at a fixed `https://accounts.google.com/ServiceLogin` URL, **without** DevTools, refuses if another live browser holds the profile, and records its own pid in `$XDG_RUNTIME_DIR/io.github.kelbresqe.plak.sock.signin` (removed on exit). No sudo, no installer, no network. |
+| `bin/ytm-cdp` | none | Python 3 standard library. Starts the browser with DevTools on fds 3/4 (Chromium's pipe mode) and lives exactly as long as it. Relays the pipe on `<profile>/Plak-DevTools.sock`, created with umask 0177 and chmod 0600 inside the 0700 profile, to one client at a time; a client's leftover sessions are detached when it leaves. |
+| `bin/ytm-bridge` | none | Python 3 standard library. Connects to `<profile>/Plak-DevTools.sock`; listens on `$XDG_RUNTIME_DIR/io.github.kelbresqe.plak.sock`, created with umask 0177 and chmod 0600. |
 | `bin/page.js` | page context | the only code evaluated inside the YouTube Music page. Installed once per attach with `Runtime.evaluate`; every later call is `Runtime.callFunctionOn` with **typed arguments**, never string-built JavaScript. |
 | `Service.qml` | shell | spawns the bridge, `notify-send`, `which cava`, `cava`, and `hyprctl dispatch_lua_expression` with fixed argument arrays. |
 
@@ -20,9 +21,14 @@ and cannot reach, and where a reviewer should look.
 - Store a token or credential anywhere. The only persistent state is
   Chromium's own profile directory (which the user owns and can delete), a
   cached copy of the playlist list, and downloaded artwork for notifications.
-- Expose the debug port to the user's everyday profile. Chromium ≥ 136
-  refuses remote debugging on the default profile regardless; the plugin
-  never asks for it.
+- Open a DevTools port. A `--remote-debugging-port` listener on 127.0.0.1
+  has no authentication: any local user, or a sandbox or container sharing
+  the host network, could attach to the signed-in profile and read its
+  cookies. The pipe and the 0600 socket in the 0700 profile are reachable
+  only by the user who owns them.
+- Expose DevTools on the user's everyday profile. Chromium ≥ 136 refuses
+  remote debugging on the default profile regardless; the plugin never asks
+  for it.
 - Send anything to a third party. All requests go to `music.youtube.com`
   (page context) or to Google's image hosts (artwork for notifications,
   restricted by an allowlist of hostnames).
@@ -48,13 +54,12 @@ lines without dropping the client; the fake-DevTools test suite covers each.
 ## What comes back from the browser is bounded
 
 The DevTools channel carries JSON shaped by the remote page, so every read
-from it has a hard cap and the connection is closed — not buffered — the
-moment one is exceeded: the HTTP upgrade response (16 KiB), `/json/version`
-(64 KiB), one WebSocket frame's declared length and a fragmented message's
-total (16 MiB each). The largest real reply measured on a live account is
-`home` at 1.35 MB on the wire. Artwork downloads stop at 2 MiB. The tests
-drive each limit from a hostile endpoint and check the bridge re-attaches
-afterwards.
+from it has a hard cap: one message is at most 16 MiB. Past that the bridge
+closes its connection rather than buffer, and the relay skips the message
+(it cannot close the browser's pipe without closing the browser). The
+largest real reply measured on a live account is `home` at 1.35 MB on the
+wire. Artwork downloads stop at 2 MiB. The tests drive the limit from a
+hostile endpoint and check the bridge re-attaches afterwards.
 
 ## The timed-lyrics request
 

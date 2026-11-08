@@ -1,0 +1,282 @@
+#!/usr/bin/env python3
+"""ytm-cdp: start the app browser on a DevTools pipe and lend that pipe, one
+client at a time, over a private unix socket.
+
+--remote-debugging-port opens a TCP listener on 127.0.0.1 with no
+authentication: any local user, or a sandbox or container sharing the host
+network, could attach and read the whole profile, Google sign-in included.
+--remote-debugging-pipe opens nothing. Chromium speaks DevTools to the process
+that started it on fds 3 (commands in) and 4 (replies and events out), as
+NUL-terminated JSON, and quits when that end closes. So this process starts
+the browser, lives exactly as long as it does, and relays the pipe on SOCKET:
+mode 0600, inside the 0700 profile directory. Same framing on both sides.
+
+    ytm-cdp SOCKET BROWSER [ARGS...]      ARGS include --remote-debugging-pipe
+
+The bridge can restart without taking the music down. Command ids are
+renumbered on the way in, so a reply meant for an earlier client is dropped
+instead of answering a later one's call; when a client leaves, the sessions
+it attached are detached and target discovery is switched off, which is what
+Chromium does for a WebSocket client that hangs up. A second client is
+refused (closed at once) while one is connected.
+
+If a live relay already answers on SOCKET, a browser already runs on this
+profile: BROWSER is exec'd without the pipe flag, hands ARGS to the running
+instance (which opens or raises the window) and exits.
+
+Standard library only. Python 3.9+.
+"""
+import errno
+import fcntl
+import json
+import os
+import socket
+import subprocess
+import sys
+import threading
+
+PIPE_FLAG = "--remote-debugging-pipe"
+# The largest real message measured is ~1.4 MB (`home`); see the bridge.
+MAX_MESSAGE = 16 * 1024 * 1024
+
+
+def log(*parts):
+    sys.stderr.write("ytm-cdp: " + " ".join(str(p) for p in parts) + "\n")
+    sys.stderr.flush()
+
+
+class Splitter:
+    """NUL-terminated messages out of a byte stream. A message over
+    MAX_MESSAGE is skipped whole (and counted), so the stream stays in step
+    without ever buffering more than MAX_MESSAGE plus one read."""
+
+    def __init__(self):
+        self.buf = bytearray()
+        self.skipping = False
+        self.dropped = 0
+
+    def feed(self, data):
+        *done, rest = data.split(b"\0")
+        out = []
+        for piece in done:
+            if self.skipping:
+                self.skipping = False
+            else:
+                self.buf += piece
+                if len(self.buf) <= MAX_MESSAGE:
+                    out.append(bytes(self.buf))
+                else:
+                    self.dropped += 1
+            self.buf.clear()
+        if not self.skipping:
+            self.buf += rest
+            if len(self.buf) > MAX_MESSAGE:
+                self.buf.clear()
+                self.skipping = True
+                self.dropped += 1
+        return out
+
+
+def dumps(msg):
+    return json.dumps(msg, separators=(",", ":"), ensure_ascii=False).encode()
+
+
+class Relay:
+    def __init__(self, to_browser):
+        self.to_browser = to_browser      # our end of the browser's fd 3
+        self.wlock = threading.Lock()     # one writer on that pipe at a time
+        self.lock = threading.Lock()      # client, ids, sessions, next_id
+        self.client = None
+        self.leaving = False              # a client's sessions are being cleaned up; hold the next one
+        self.ids = {}                     # relay id -> the current client's id
+        self.sessions = set()             # top-level sessions attached since the last client left
+        self.next_id = 0
+
+    def _send_browser(self, data):
+        with self.wlock:
+            try:
+                self.to_browser.write(data + b"\0")
+                self.to_browser.flush()
+            except OSError:
+                pass                      # browser gone; main() is about to exit
+
+    # -- browser -> client ------------------------------------------------
+    def pump_browser(self, fd):
+        split = Splitter()
+        while True:
+            data = os.read(fd, 65536)
+            if not data:
+                return
+            for raw in split.feed(data):
+                self._route(raw)
+            if split.dropped:
+                log("dropped", split.dropped, "oversized message(s) from the browser")
+                split.dropped = 0
+
+    def _route(self, raw):
+        try:
+            msg = json.loads(raw)
+        except ValueError:
+            return
+        if not isinstance(msg, dict):
+            return
+        with self.lock:
+            client = self.client
+            if "id" in msg:
+                rid = msg["id"]
+                cid = self.ids.pop(rid, None) if client and isinstance(rid, int) else None
+                if cid is None:
+                    return                # an earlier client's, or the relay's own
+                msg["id"] = cid
+                raw = dumps(msg)
+            elif "sessionId" not in msg:
+                p = msg.get("params") or {}
+                if msg.get("method") == "Target.attachedToTarget":
+                    self.sessions.add(p.get("sessionId"))
+                elif msg.get("method") == "Target.detachedFromTarget":
+                    self.sessions.discard(p.get("sessionId"))
+        if client is None:
+            return
+        try:
+            client.sendall(raw + b"\0")
+        except OSError:
+            self._leave(client)
+
+    # -- client -> browser ------------------------------------------------
+    def accept_loop(self, srv):
+        while True:
+            conn, _ = srv.accept()
+            with self.lock:
+                busy = self.client is not None or self.leaving
+                if not busy:
+                    self.client = conn
+            if busy:
+                conn.close()
+                continue
+            threading.Thread(target=self._serve, args=(conn,), daemon=True).start()
+
+    def _serve(self, conn):
+        split = Splitter()
+        try:
+            while True:
+                data = conn.recv(65536)
+                if not data:
+                    break
+                for raw in split.feed(data):
+                    msg = json.loads(raw)
+                    if not isinstance(msg, dict) or not isinstance(msg.get("id"), int) \
+                            or isinstance(msg.get("id"), bool) or not isinstance(msg.get("method"), str):
+                        raise ValueError("not a DevTools command")
+                    with self.lock:
+                        if self.client is not conn:
+                            return
+                        self.next_id += 1
+                        self.ids[self.next_id] = msg["id"]
+                        msg["id"] = self.next_id
+                    self._send_browser(dumps(msg))
+                if split.dropped:
+                    raise ValueError("message too large")
+        except (OSError, ValueError) as e:
+            log("client dropped:", e)
+        finally:
+            self._leave(conn)
+
+    def _leave(self, conn):
+        with self.lock:
+            if self.client is not conn:
+                return
+            self.client, self.leaving = None, True
+            self.ids.clear()
+            cleanup = [("Target.detachFromTarget", {"sessionId": s}) for s in self.sessions]
+            cleanup.append(("Target.setDiscoverTargets", {"discover": False}))
+            self.sessions = set()
+            cmds = []
+            for method, params in cleanup:
+                self.next_id += 1         # not in self.ids, so the reply is dropped
+                cmds.append(dumps({"id": self.next_id, "method": method, "params": params}))
+        try:
+            conn.shutdown(socket.SHUT_RDWR)   # wakes the client thread's recv
+        except OSError:
+            pass
+        conn.close()
+        # Sent before the next client is let in, so its own setup lands after.
+        for c in cmds:
+            self._send_browser(c)
+        with self.lock:
+            self.leaving = False
+
+
+def listen(path):
+    """The listening socket on path, or None if a live relay already has it."""
+    for attempt in (1, 2):
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        old = os.umask(0o177)
+        try:
+            s.bind(path)
+            os.chmod(path, 0o600)
+            s.listen(4)
+            return s
+        except OSError as e:
+            s.close()
+            if e.errno != errno.EADDRINUSE or attempt == 2:
+                raise
+        finally:
+            os.umask(old)
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            probe.connect(path)
+            return None
+        except OSError:
+            try:
+                os.unlink(path)           # left behind by a relay that was killed
+            except FileNotFoundError:
+                pass
+        finally:
+            probe.close()
+
+
+def main():
+    if len(sys.argv) < 3:
+        sys.stderr.write("usage: ytm-cdp SOCKET BROWSER [ARGS...]\n")
+        sys.exit(2)
+    path, argv = sys.argv[1], sys.argv[2:]
+    # shortcut: AF_UNIX paths stop at 107 bytes, so a profile path over ~85
+    # bytes cannot hold the socket; move it under $XDG_RUNTIME_DIR if anyone hits that.
+    srv = listen(path)
+    if srv is None:
+        os.execvp(argv[0], [a for a in argv if a != PIPE_FLAG])
+    inode = os.stat(path).st_ino
+
+    cmd_r, cmd_w = os.pipe()      # browser reads commands on its fd 3
+    out_r, out_w = os.pipe()      # browser writes replies and events on its fd 4
+
+    def browser_fds():
+        # Lift both ends above 3/4 first, so neither dup2 clobbers the other.
+        a = fcntl.fcntl(cmd_r, fcntl.F_DUPFD, 10)
+        b = fcntl.fcntl(out_w, fcntl.F_DUPFD, 10)
+        os.dup2(a, 3)
+        os.dup2(b, 4)
+
+    try:
+        proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, preexec_fn=browser_fds, pass_fds=(3, 4))
+    except OSError as e:
+        log("cannot start", argv[0], e)
+        os.unlink(path)
+        sys.exit(3)
+    os.close(cmd_r)
+    os.close(out_w)
+
+    relay = Relay(os.fdopen(cmd_w, "wb"))
+    threading.Thread(target=relay.accept_loop, args=(srv,), daemon=True).start()
+    threading.Thread(target=relay.pump_browser, args=(out_r,), daemon=True).start()
+    rc = proc.wait()
+    try:
+        if os.stat(path).st_ino == inode:
+            os.unlink(path)
+    except OSError:
+        pass
+    os._exit(rc if rc >= 0 else 1)
+
+
+if __name__ == "__main__":
+    main()

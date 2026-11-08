@@ -46,12 +46,12 @@ out=$(run)
 expected="$fake/chromium
 --app=https://music.youtube.com
 --user-data-dir=$YTM_PROFILE_DIR
---remote-debugging-port=0
+--remote-debugging-pipe
 --autoplay-policy=no-user-gesture-required
 --no-first-run
 --no-default-browser-check"
 [ "$out" = "$expected" ] && ok || { bad "flags"; diff <(echo "$expected") <(echo "$out"); }
-echo "$out" | grep -q 9222 && bad "fixed port present" || ok
+echo "$out" | grep -q -- '--remote-debugging-port' && bad "TCP debug port present" || ok
 [ -d "$YTM_PROFILE_DIR" ] && [ "$(stat -c %a "$YTM_PROFILE_DIR")" = "700" ] && ok || bad "profile dir not 0700"
 
 # 7. the browser recorded in the profile wins over a changed default

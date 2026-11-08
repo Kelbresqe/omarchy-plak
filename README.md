@@ -97,9 +97,9 @@ with its own browser profile. While you're signed out, the panel offers
 **Sign in with Google**.
 
 Google won't let you sign in from the app window itself ("This browser or
-app may not be secure") because the plugin drives that window over the
-DevTools port. So **Sign in with Google** closes it and opens a normal
-window on the same profile, without the debug port and with the address bar
+app may not be secure") because the plugin drives that window over
+DevTools. So **Sign in with Google** closes it and opens a normal
+window on the same profile, without DevTools and with the address bar
 showing `accounts.google.com`. Sign in there and close the window. Plak
 reopens the app on its own, now signed in, and the panel loads your library.
 You won't be asked again; the session lives in that profile.
@@ -221,10 +221,12 @@ Edit them in the bar's widget settings or `~/.config/omarchy/shell.json`:
 Plak is the name; the plugin id is `io.github.kelbresqe.plak`.
 
 `bin/ytm-app` launches the browser as an app window with a **dedicated
-profile** (`~/.local/share/io.github.kelbresqe.plak/profile`) and a DevTools port bound to
-localhost on a random port. `bin/ytm-bridge` (Python, standard library)
-attaches over that port, installs one function into the page (`bin/page.js`),
-and serves a small JSON protocol on a private unix socket that the bar reads.
+profile** (`~/.local/share/io.github.kelbresqe.plak/profile`). DevTools runs
+over a pipe, not a network port: `bin/ytm-cdp` starts the browser with
+`--remote-debugging-pipe` and passes that pipe on through a unix socket only
+your user can open. `bin/ytm-bridge` (Python, standard library) attaches
+there, installs one function into the page (`bin/page.js`), and serves a
+small JSON protocol on a private unix socket that the bar reads.
 
 Every request for your data — playlists, queue, lyrics, likes — runs *inside
 the page*, as the site's own JavaScript would, using the session the browser
@@ -232,8 +234,9 @@ already holds. The plugin never reads cookies, never stores a token, and has
 no credential to leak. Playback control goes over MPRIS, the same interface
 Omarchy's own media widget uses.
 
-Your everyday browser profile is untouched and never debuggable: the port
-belongs to the plugin's profile only. See [SECURITY.md](SECURITY.md).
+Your everyday browser profile is untouched and never debuggable, and no
+other user or sandboxed app on the machine can reach the plugin's profile
+either: there is no localhost port to connect to. See [SECURITY.md](SECURITY.md).
 
 Where things live:
 
@@ -285,12 +288,13 @@ If you appended `hypr/ytm.lua` to your bindings, delete the block between
 ## Development
 
 ```sh
-bash tests/run-all.sh          # launcher, bridge (against a fake DevTools), parsers, glow maths
+bash tests/run-all.sh          # launcher, DevTools relay, bridge (against a fake DevTools), parsers, glow maths
 omarchy plugin validate .
 ```
 
 The bridge tests never touch a browser or the network: `tests/fakecdp.py`
-speaks just enough of the DevTools protocol. InnerTube parsers are tested
+speaks just enough of the DevTools protocol, and `tests/fakepipe.py` stands
+in for the browser on the other side of `bin/ytm-cdp`. InnerTube parsers are tested
 against fixtures in `tests/fixtures/innertube/`, including a scrubbed capture
 of the current flat search layout.
 
