@@ -43,6 +43,7 @@ Item {
   }
 
   function textKey(t) {
+    if (root.openList && root.panel && root.panel.trackKey(t, root.rows[root.cursor])) return
     if (t === "s" && root.openList) root.svc.play(root.openPlaylistId || root.openList.id, "", true)
     if (t === "a" && root.openList) root.svc.play(root.openPlaylistId || root.openList.id, "", false)
     if (t === "\b") root.back()
@@ -229,6 +230,8 @@ Item {
         current: root.svc && root.svc.video === modelData.videoId
         onActivated: { root.cursor = index; root.svc.play(root.openPlaylistId || root.openList.id, modelData.videoId, false) }
         onSecondary: root.svc.radio(modelData.videoId)
+        actions: root.panel ? root.panel.trackActions : []
+        onAction: function(name) { root.panel.trackAction(name, modelData) }
       }
     }
   }

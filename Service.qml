@@ -527,15 +527,37 @@ Item {
 
   property double sleepUntil: 0          // epoch ms, 0 = off
   readonly property int sleepMinutesLeft: sleepUntil > 0 ? Math.max(0, Math.ceil((sleepUntil - sleepTick.now) / 60000)) : 0
+  // "At the end of this song": armed on the track playing then.
+  property bool sleepAtEnd: false
+  property string sleepEndVideo: ""
+  readonly property bool sleepArmed: root.sleepUntil > 0 || root.sleepAtEnd
 
   function setSleep(minutes) {
+    root.sleepAtEnd = false
     root.sleepUntil = minutes > 0 ? Date.now() + minutes * 60000 : 0
     sleepTick.now = Date.now()
   }
-  // Cycles 15 → 30 → 60 → off, the way a bedside radio does.
+  function setSleepAtEnd() {
+    root.sleepUntil = 0
+    root.sleepEndVideo = root.video
+    root.sleepAtEnd = root.video !== ""
+  }
+  // Cycles 15 → 30 → 60 → end of song → off, the way a bedside radio does.
   function cycleSleep() {
+    if (root.sleepAtEnd) { root.setSleep(0); return }
     var left = root.sleepMinutesLeft
-    root.setSleep(left === 0 ? 15 : left <= 15 ? 30 : left <= 30 ? 60 : 0)
+    if (left === 0) root.setSleep(15)
+    else if (left <= 15) root.setSleep(30)
+    else if (left <= 30) root.setSleep(60)
+    else root.setSleepAtEnd()
+  }
+  // Stop gently: the page lowers the player's own volume to 0 over the given
+  // seconds, pauses, and puts the volume back (the remembered volume is not
+  // touched). Plain MPRIS pause if the page can't.
+  function fadeOut(seconds) {
+    root.request("player.fade", { seconds: seconds }, function(m) {
+      if (!m.ok && root.player && root.player.isPlaying) root.player.pause()
+    })
   }
   Timer {
     id: sleepTick
@@ -547,9 +569,87 @@ Item {
       now = Date.now()
       if (now >= root.sleepUntil) {
         root.sleepUntil = 0
-        if (root.player && root.player.isPlaying) root.player.pause()
+        if (root.isPlaying) root.fadeOut(10)
       }
     }
+  }
+  // End of song: fade the last second, or stop the next song at once if the
+  // track already changed (MPRIS' length can be off, or a tick missed).
+  Timer {
+    interval: 500
+    repeat: true
+    running: root.sleepAtEnd && root.isPlaying
+    onTriggered: {
+      var p = root.player
+      if (root.video !== "" && root.video !== root.sleepEndVideo) {
+        root.sleepAtEnd = false
+        if (p && p.isPlaying) p.pause()
+        return
+      }
+      if (p && p.lengthSupported && p.length > 3 && p.position >= p.length - 1.5) {
+        root.sleepAtEnd = false
+        root.fadeOut(1)
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- queue edits, history, save
+
+  // A short line on Omarchy's OSD, with the media icon. Only fixed catalog
+  // text goes here, never a song title.
+  function osd(message) { Quickshell.execDetached(["omarchy-osd", "-i", "media", "-m", message]) }
+
+  function queueAdd(videoId, next) {
+    if (!Ytm.isValidId(videoId)) return
+    root.request("queue.add", { video: videoId, next: !!next }, function(m) {
+      if (!m.ok) { root.osd(root.tr("osd.failed", "That didn't work")); return }
+      if (m.data && m.data.added > 0) root.osd(next ? root.tr("osd.playsNext", "Plays next") : root.tr("osd.queued", "Added to the queue"))
+      queueRefresh.restart()
+    })
+  }
+  function queueRemove(index) {
+    root.request("queue.remove", { index: index }, function(m) {
+      if (!m.ok) root.osd(root.tr("osd.failed", "That didn't work"))
+      root.loadQueue()
+    })
+  }
+  function queueMove(from, to) {
+    root.request("queue.move", { from: from, to: to }, function(m) { root.loadQueue() })
+  }
+
+  property var history: []              // Ytm.parseHistory: [{title, items}]
+  property bool historyLoading: false
+  function loadHistory() {
+    if (root.historyLoading) return
+    root.historyLoading = true
+    root.request("history", null, function(m) {
+      root.historyLoading = false
+      if (m.ok) root.history = Ytm.parseHistory(m.data)
+    })
+  }
+
+  // Save to playlist: the song being saved, and the playlists it can go to.
+  property var saveTrack: null          // {videoId, title, artist}
+  property var saveTargets: []          // Ytm.parseSaveTargets: [{id, title, contains}]
+  property bool saveLoading: false
+  function prepareSave(track) {
+    if (!track || !Ytm.isValidId(track.videoId)) return false
+    root.saveTrack = { videoId: track.videoId, title: String(track.title || ""), artist: String(track.artist || "") }
+    root.saveTargets = []
+    root.saveLoading = true
+    root.request("playlist.targets", { video: track.videoId }, function(m) {
+      root.saveLoading = false
+      if (m.ok) root.saveTargets = Ytm.parseSaveTargets(m.data)
+    })
+    return true
+  }
+  function saveTo(listId, cb) {
+    if (!root.saveTrack || !Ytm.isValidId(listId)) return
+    root.request("playlist.add", { video: root.saveTrack.videoId, list: listId }, function(m) {
+      var ok = m.ok && m.data && m.data.status === "STATUS_SUCCEEDED"
+      root.osd(ok ? root.tr("osd.saved", "Saved to the playlist") : root.tr("osd.saveFailed", "Couldn't save"))
+      if (cb) cb(ok)
+    })
   }
 
   // ---------------------------------------------------------------- auto relaunch

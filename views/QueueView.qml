@@ -20,7 +20,34 @@ Item {
     root.cursor = Math.max(0, Math.min(n - 1, start + dy))
     list.positionViewAtIndex(root.cursor, ListView.Contain)
   }
-  function activate() { if (root.cursor >= 0) root.svc.queueJump(root.cursor) }
+  // Queue ops take the store index each row carries (Ytm.parseQueue), not
+  // the list position.
+  function activate() { var it = root.queue.items[root.cursor]; if (it) root.svc.queueJump(it.index) }
+
+  // Ctrl+↑ / Ctrl+↓ (PanelKeyCatcher.reorderRequested) and Delete / x
+  // (deleteRequested), on the cursor row.
+  function reorder(dy) { if (root.cursor >= 0) root.moveRow(root.cursor, dy) }
+  function remove() { if (root.cursor >= 0) root.removeRow(root.cursor) }
+  function moveRow(pos, dy) {
+    var items = root.queue.items
+    var to = pos + dy
+    if (pos < 0 || pos >= items.length || to < 0 || to >= items.length) return
+    root.svc.queueMove(items[pos].index, items[to].index)
+    root.cursor = to
+  }
+  function removeRow(pos) {
+    var items = root.queue.items
+    if (pos < 0 || pos >= items.length || pos === root.queue.current) return
+    root.svc.queueRemove(items[pos].index)
+    root.cursor = Math.min(pos, items.length - 2)
+  }
+  readonly property var moveActions: root.svc ? [
+    { name: "up", icon: "\u{F0143}", tip: root.svc.tr("queue.moveUp", "Move up (Ctrl+↑)") },
+    { name: "down", icon: "\u{F0140}", tip: root.svc.tr("queue.moveDown", "Move down (Ctrl+↓)") }
+  ] : []
+  readonly property var removeAction: root.svc ? [
+    { name: "remove", icon: "\u{F0156}", tip: root.svc.tr("queue.remove", "Remove (Del)") }
+  ] : []
   function textKey(t) { if (t === "g") { root.cursor = root.queue.current; list.positionViewAtIndex(Math.max(0, root.queue.current), ListView.Center) } }
   function tr(key, fallback) { return root.svc ? root.svc.tr(key, fallback) : fallback }
 
@@ -63,8 +90,15 @@ Item {
         track: modelData
         selected: root.cursor === index
         current: root.queue.current === index
-        onActivated: root.svc.queueJump(index)
+        onActivated: { root.cursor = index; root.svc.queueJump(modelData.index) }
         onSecondary: root.svc.radio(modelData.videoId)
+        // The playing song can't be removed (the site refuses), so no button.
+        actions: root.queue.current === index ? root.moveActions : root.moveActions.concat(root.removeAction)
+        onAction: function(name) {
+          if (name === "up") root.moveRow(index, -1)
+          else if (name === "down") root.moveRow(index, 1)
+          else if (name === "remove") root.removeRow(index)
+        }
       }
     }
   }

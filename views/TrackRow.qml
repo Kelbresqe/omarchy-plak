@@ -11,8 +11,15 @@ Rectangle {
   property bool selected: false      // keyboard cursor
   property bool current: false       // the track that is playing
   property bool showAlbum: true
+  // Small buttons at the right, shown while the row is hovered or under the
+  // keyboard cursor (they take the duration's place): [{name, icon, tip}].
+  property var actions: []
   signal activated()
   signal secondary()                 // right click / radio
+  signal action(string name)
+
+  HoverHandler { id: rowHover }
+  readonly property bool showActions: root.actions.length > 0 && (root.selected || rowHover.hovered)
 
   height: Style.space(40)
   radius: Style.cornerRadius
@@ -52,7 +59,7 @@ Rectangle {
     }
 
     Column {
-      width: parent.width - Style.space(32) - durText.width - Style.space(16)
+      width: parent.width - Style.space(32) - (root.showActions ? actionRow.width : durText.width) - Style.space(16)
       anchors.verticalCenter: parent.verticalCenter
       spacing: 1
       Text {
@@ -83,6 +90,7 @@ Rectangle {
 
     Text {
       id: durText
+      visible: !root.showActions
       anchors.verticalCenter: parent.verticalCenter
       textFormat: Text.PlainText
       text: (root.track && root.track.liked ? "\u{F02D1} " : "") + (root.track && root.track.dur ? root.track.dur : "")
@@ -100,5 +108,25 @@ Rectangle {
     cursorShape: Qt.PointingHandCursor
     acceptedButtons: Qt.LeftButton | Qt.RightButton
     onClicked: function(mouse) { if (mouse.button === Qt.RightButton) root.secondary(); else root.activated() }
+  }
+
+  // After the MouseArea, so the buttons get their own clicks.
+  Row {
+    id: actionRow
+    anchors.right: parent.right
+    anchors.rightMargin: Style.space(4)
+    anchors.verticalCenter: parent.verticalCenter
+    spacing: Style.space(2)
+    visible: root.showActions
+    Repeater {
+      model: root.actions
+      delegate: PanelActionButton {
+        required property var modelData
+        iconText: modelData.icon
+        tooltipText: modelData.tip
+        fontFamily: root.family
+        onClicked: root.action(modelData.name)
+      }
+    }
   }
 }

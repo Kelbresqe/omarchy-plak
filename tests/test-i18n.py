@@ -22,7 +22,7 @@ if en is None:
 
 # Keys used by the code: tr("key", …) / trn("key", …) in QML, describe() keys in Bridge.js.
 used = set()
-sources = [os.path.join(ROOT, "BarWidget.qml"), os.path.join(ROOT, "Panel.qml"), os.path.join(ROOT, "Bridge.js")]
+sources = [os.path.join(ROOT, n) for n in ("BarWidget.qml", "Panel.qml", "Service.qml", "Bridge.js")]
 sources += [os.path.join(ROOT, "views", n) for n in os.listdir(os.path.join(ROOT, "views")) if n.endswith(".qml")]
 for path in sources:
     with open(path, encoding="utf-8") as f:

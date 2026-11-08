@@ -17,6 +17,7 @@ Column {
     { name: "player",    glyph: "\u{F075A}", tip: "Now playing (n)" },
     { name: "playlists", glyph: "\u{F0CB8}", tip: "Playlists (p)" },
     { name: "queue",     glyph: "\u{F0411}", tip: "Up next (q)" },
+    { name: "history",   glyph: "\u{F02DA}", tip: "History (i)" },
     { name: "lyrics",    glyph: "\u{F036C}", tip: "Lyrics (y)" },
     { name: "search",    glyph: "\u{F0349}", tip: "Search (/)" }
   ]

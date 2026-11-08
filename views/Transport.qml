@@ -8,6 +8,7 @@ Column {
   id: root
   property var svc: null
   property var bar: null
+  property var panel: null
   property string family: Style.font.family
   spacing: Style.space(6)
 
@@ -90,6 +91,13 @@ Column {
         enabled: root.svc && root.svc.ready && root.svc.video !== ""
         onClicked: root.svc.radio(root.svc.video)
       }
+      PanelActionButton {
+        iconText: "\u{F0CB8}"
+        tooltipText: root.tr("transport.save", "Save to playlist (b)")
+        fontFamily: root.family
+        enabled: root.svc && root.svc.ready && root.svc.video !== "" && root.panel !== null
+        onClicked: root.panel.openSave({ videoId: root.svc.video, title: root.svc.title, artist: root.svc.artist })
+      }
     }
 
     // Centre: transport.
@@ -130,7 +138,7 @@ Column {
         readonly property bool on: root.svc ? root.svc.shuffleOn : false
         iconText: "\u{F049D}"
         foreground: on ? Color.accent : Color.foreground
-        tooltipText: on ? root.tr("transport.shuffleOn", "Shuffle: on (x)") : root.tr("transport.shuffleOff", "Shuffle: off (x)")
+        tooltipText: on ? root.tr("transport.shuffleOn", "Shuffle: on (m)") : root.tr("transport.shuffleOff", "Shuffle: off (m)")
         fontFamily: root.family
         visible: root.svc && root.svc.shuffleKnown
         enabled: root.svc && root.svc.shuffleSupported
@@ -166,10 +174,11 @@ Column {
       }
       PanelActionButton {
         iconText: root.svc && root.svc.sleepMinutesLeft > 0 ? "\u{F04B2}" : "\u{F04B2}"
-        foreground: root.svc && root.svc.sleepMinutesLeft > 0 ? Color.accent : Color.foreground
-        tooltipText: root.svc && root.svc.sleepMinutesLeft > 0
+        foreground: root.svc && root.svc.sleepArmed ? Color.accent : Color.foreground
+        tooltipText: root.svc && root.svc.sleepAtEnd ? root.tr("transport.sleepEnd", "Sleeps at the end of this song (click to change)")
+          : root.svc && root.svc.sleepMinutesLeft > 0
           ? root.svc.trn("transport.sleepIn", root.svc.sleepMinutesLeft, "Sleep in %1 min (click to change)").arg(I18n.formatNumber(root.svc.sleepMinutesLeft))
-          : root.tr("transport.sleepTimer", "Sleep timer: 15 / 30 / 60 min")
+          : root.tr("transport.sleepTimer", "Sleep timer: 15 / 30 / 60 min / end of song")
         fontFamily: root.family
         onClicked: if (root.svc) root.svc.cycleSleep()
       }

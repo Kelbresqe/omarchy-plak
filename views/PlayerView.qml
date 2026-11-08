@@ -283,7 +283,7 @@ Item {
         textFormat: Text.PlainText
         // Key/label pairs are joined with no-break spaces (also in the
         // catalogs) so they never wrap apart.
-        text: root.tr("player.keys", "Space\u00a0play/\u2060pause  ·  ,\u00a0.\u00a0prev/\u2060next  ·  ←\u00a0→\u00a0seek  ·  f\u00a0like  ·  r\u00a0radio  ·  t\u00a0repeat  ·  x\u00a0shuffle  ·  Tab\u00a0views")
+        text: root.tr("player.keys", "Space\u00a0play/\u2060pause  ·  ,\u00a0.\u00a0prev/\u2060next  ·  ←\u00a0→\u00a0seek  ·  f\u00a0like  ·  r\u00a0radio  ·  t\u00a0repeat  ·  m\u00a0shuffle  ·  b\u00a0save  ·  Tab\u00a0views")
         color: Color.foreground
         opacity: 0.35
         font.family: root.family

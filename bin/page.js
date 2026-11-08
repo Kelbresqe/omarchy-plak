@@ -202,6 +202,44 @@
     return out
   }
 
+  // The site's own queue store (Redux-style getState / dispatch on
+  // <ytmusic-app>.queue). Reading and editing the queue through it keeps
+  // indexes exact: the rendered rows also hold stale and twin entries
+  // (measured: 58 rows for a 50-item queue). Store access and the action
+  // names (ADD_ITEMS, REMOVE_ITEM, MOVE_ITEM, SET_INDEX) follow Solfa,
+  // SirAllap/omarchy-solfa (MIT).
+  function queueStore() {
+    const a = document.querySelector("ytmusic-app")
+    const s = a && a.queue && a.queue.store
+    return s && typeof s.getState === "function" && typeof s.dispatch === "function" ? s : null
+  }
+
+  function storeRenderer(item) {
+    if (!item) return null
+    if (item.playlistPanelVideoRenderer) return item.playlistPanelVideoRenderer
+    const w = item.playlistPanelVideoWrapperRenderer
+    return (w && w.primaryRenderer && w.primaryRenderer.playlistPanelVideoRenderer) || null
+  }
+
+  // After an edit the selection index points at whatever now sits there;
+  // put it back on the track that is playing.
+  function keepSelection(s, videoId) {
+    const q = s.getState().queue
+    for (let i = 0; i < q.items.length; i++) {
+      const r = storeRenderer(q.items[i])
+      if (r && r.videoId === videoId) {
+        if (i !== q.selectedItemIndex) s.dispatch({ type: "SET_INDEX", payload: i })
+        return
+      }
+    }
+  }
+
+  function needStore() {
+    const s = queueStore()
+    if (!s) throw new Error("no-queue")
+    return s
+  }
+
   // Polymer elements expose their renderer JSON as `.data`; the queue items
   // carry the same playlistPanelVideoRenderer shape the `next` endpoint uses,
   // so the parser in Ytm.js handles both without knowing which one it got.
@@ -318,7 +356,17 @@
       return { shuffled: true }
     },
 
+    // The store first (exact indexes, see queueStore), then the rendered
+    // rows, then the `next` endpoint.
     async queue() {
+      const s = queueStore()
+      if (s) {
+        const q = s.getState().queue || {}
+        const items = (q.items || []).map((it, i) => ({
+          playlistPanelVideoRenderer: storeRenderer(it), selected: i === q.selectedItemIndex, index: i,
+        }))
+        if (items.length) return { source: "store", items: items }
+      }
       const dom = domQueue()
       if (dom) return { source: "dom", items: dom }
       const v = currentVideo()
@@ -328,12 +376,91 @@
     },
 
     async "queue.jump"(arg) {
+      const s = queueStore()
+      const app = document.querySelector("ytmusic-app")
+      if (s && app && app.queue && typeof app.queue.selectQueueItem === "function") {
+        const entry = (s.getState().queue.items || [])[arg.index]
+        if (!entry) return { jumped: false }
+        app.queue.selectQueueItem(entry)
+        return { jumped: true }
+      }
       const items = Array.from(document.querySelectorAll("ytmusic-player-queue-item"))
       const el = items[arg.index]
       if (!el) return { jumped: false }
       const btn = el.querySelector("ytmusic-play-button-renderer") || el
       btn.click()
       return { jumped: true }
+    },
+
+    // Put a song right after the playing one (next: true) or at the end.
+    // With nothing loaded there is no queue to add to, so it just plays.
+    async "queue.add"(arg) {
+      const s = queueStore()
+      const playing = currentVideo()
+      if (!s || !playing || !(s.getState().queue.items || []).length) {
+        return Object.assign({ added: 0, played: true }, await watch(arg.video, ""))
+      }
+      const res = await innertube("music/get_queue", { videoIds: [arg.video] })
+      const entries = ((res && res.queueDatas) || []).map(d => d && d.content).filter(Boolean)
+      if (!entries.length) throw new Error("not-found")
+      const q = s.getState().queue
+      const before = q.items.length
+      const index = arg.next ? Math.min(before, (q.selectedItemIndex || 0) + 1) : before
+      s.dispatch({ type: "ADD_ITEMS", payload: { items: entries, index: index, nextQueueItemId: q.nextQueueItemId, shouldAssignIds: true } })
+      keepSelection(s, playing)
+      if (s.getState().queue.items.length !== before + entries.length) throw new Error("unchanged")
+      return { added: entries.length, index: index }
+    },
+
+    async "queue.remove"(arg) {
+      const s = needStore()
+      const q = s.getState().queue
+      if (arg.index < 0 || arg.index >= q.items.length) throw new Error("out-of-range")
+      if (arg.index === q.selectedItemIndex) throw new Error("playing")
+      const playing = currentVideo()
+      s.dispatch({ type: "REMOVE_ITEM", payload: arg.index })
+      keepSelection(s, playing)
+      return { removed: true }
+    },
+
+    async "queue.move"(arg) {
+      const s = needStore()
+      const n = s.getState().queue.items.length
+      if (arg.from < 0 || arg.from >= n || arg.to < 0 || arg.to >= n) throw new Error("out-of-range")
+      if (arg.from === arg.to) return { moved: false }
+      const playing = currentVideo()
+      s.dispatch({ type: "MOVE_ITEM", payload: { fromIndex: arg.from, toIndex: arg.to } })
+      keepSelection(s, playing)
+      return { moved: true }
+    },
+
+    async history() {
+      return innertube("browse", { browseId: "FEmusic_history" })
+    },
+
+    // The playlists this account can add the song to, with whether each
+    // already has it (playlistAddToOptionRenderer.containsSelectedVideos).
+    async "playlist.targets"(arg) {
+      return innertube("playlist/get_add_to_playlist", { videoIds: [arg.video] })
+    },
+
+    // Lower the player's own volume to 0 over `seconds`, pause, then put the
+    // volume back. movie_player.setVolume() is not what the site remembers
+    // (the slider / PREF cookie are), so nothing is left changed.
+    async "player.fade"(arg) {
+      const mp = document.getElementById("movie_player")
+      if (!mp || typeof mp.setVolume !== "function") return { faded: false }
+      const start = mp.getVolume()
+      const steps = 20
+      const ms = Math.floor(arg.seconds * 1000 / steps)
+      for (let i = 1; i <= steps; i++) {
+        mp.setVolume(Math.round(start * (1 - i / steps)))
+        await new Promise(r => setTimeout(r, ms))
+      }
+      mp.pauseVideo()
+      await new Promise(r => setTimeout(r, 300))
+      mp.setVolume(start)
+      return { faded: true }
     },
 
     async like(arg) { return innertube("like/like", { target: { videoId: arg.video } }) },
@@ -343,8 +470,10 @@
     async "playlist.add"(arg) {
       let list = arg.list
       if (list.startsWith("VL")) list = list.slice(2)
+      // DEDUPE_OPTION_SKIP: adding a song that is already there is a no-op,
+      // not a second copy. The caller checks `status` (STATUS_SUCCEEDED).
       return innertube("browse/edit_playlist", {
-        playlistId: list, actions: [{ action: "ACTION_ADD_VIDEO", addedVideoId: arg.video }],
+        playlistId: list, actions: [{ action: "ACTION_ADD_VIDEO", addedVideoId: arg.video, dedupeOption: "DEDUPE_OPTION_SKIP" }],
       })
     },
 

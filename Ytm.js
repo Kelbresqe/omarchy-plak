@@ -183,34 +183,44 @@ function parseQueueItem(r, selected) {
            dur: runsText(r.lengthText), thumb: thumbOf(r), selected: !!(selected || r.selected) }
 }
 
-// page `queue` result ({source:"dom", items} | {source:"next", next}) →
-// {items, current}. `currentVideo`, when known, wins over the DOM's
-// `selected` flag, which lingers on a skipped track's video twin.
+// page `queue` result ({source:"store"|"dom", items} | {source:"next", next})
+// → {items, current}. "store" rows come from the site's queue store with
+// their store index and an exact selection. For "dom" rows `currentVideo`,
+// when known, wins over the `selected` flag, which lingers on a skipped
+// track's video twin. Every row keeps `index`, the position the bridge's
+// queue ops take: rows that fail to parse are skipped, so the list
+// position alone would drift.
 function parseQueue(data, currentVideo) {
   var items = [], current = -1
   if (!data) return { items: items, current: current }
   var raw = []
-  if (data.source === "dom" && Array.isArray(data.items)) {
+  var exact = data.source === "store"
+  if ((data.source === "dom" || exact) && Array.isArray(data.items)) {
     for (var i = 0; i < data.items.length; i++) {
       var e = data.items[i] || {}
       var r = e.playlistPanelVideoRenderer
       // Wrapped variants carry the renderer one level down.
       if (r && r.playlistPanelVideoWrapperRenderer) r = collect(r, "playlistPanelVideoRenderer")[0]
-      raw.push({ r: r, selected: e.selected })
+      raw.push({ r: r, selected: e.selected, index: typeof e.index === "number" ? e.index : i })
     }
   } else if (data.source === "next") {
     var rs = collect(data.next, "playlistPanelVideoRenderer")
-    for (var j = 0; j < rs.length; j++) raw.push({ r: rs[j], selected: false })
+    for (var j = 0; j < rs.length; j++) raw.push({ r: rs[j], selected: false, index: j })
   }
   var lastSelected = -1
   for (var k = 0; k < raw.length; k++) {
     var row = parseQueueItem(raw[k].r, raw[k].selected)
     if (!row) continue
-    if (currentVideo && row.videoId === currentVideo && current < 0) current = items.length
-    if (row.selected) lastSelected = items.length
+    row.index = raw[k].index
+    if (exact) {
+      if (raw[k].selected && current < 0) current = items.length
+    } else {
+      if (currentVideo && row.videoId === currentVideo && current < 0) current = items.length
+      if (row.selected) lastSelected = items.length
+    }
     items.push(row)
   }
-  if (current < 0) current = lastSelected
+  if (current < 0 && !exact) current = lastSelected
   for (var m = 0; m < items.length; m++) items[m].selected = m === current
   return { items: items, current: current }
 }
@@ -339,7 +349,44 @@ function parseSearch(json) {
   return out
 }
 
+// page `playlist.targets` (playlist/get_add_to_playlist) → [{id, title,
+// contains}]: the playlists this account can add the song to, and whether
+// each already has it. The picker idea and renderer come from Dqckey's
+// omarchy-ytmusic-player (MIT).
+function parseSaveTargets(json) {
+  var out = []
+  var rs = collect(json, "playlistAddToOptionRenderer")
+  for (var i = 0; i < rs.length; i++) {
+    var r = rs[i]
+    var id = String(r.playlistId || "")
+    if (id.indexOf("VL") === 0) id = id.slice(2)
+    if (!isValidId(id)) continue
+    out.push({ id: id, title: runsText(r.title), contains: r.containsSelectedVideos === "ALL" })
+  }
+  return out
+}
+
+// page `history` (browse FEmusic_history) → [{title, items}]: one shelf per
+// day ("Today", "Yesterday", …, in the account's language), rows as in a
+// playlist. Shelves that end up empty are dropped.
+function parseHistory(json) {
+  var out = []
+  var shelves = collect(json, "musicShelfRenderer")
+  for (var i = 0; i < shelves.length; i++) {
+    var rows = collect(shelves[i].contents || [], "musicResponsiveListItemRenderer")
+    var items = []
+    for (var j = 0; j < rows.length; j++) {
+      var row = parseListItem(rows[j])
+      if (row) items.push(row)
+    }
+    if (items.length) out.push({ title: runsText(shelves[i].title), items: items })
+  }
+  return out
+}
+
 if (typeof module !== "undefined") {
+  module.exports.parseSaveTargets = parseSaveTargets
+  module.exports.parseHistory = parseHistory
   module.exports.collect = collect
   module.exports.runsText = runsText
   module.exports.splitRuns = splitRuns

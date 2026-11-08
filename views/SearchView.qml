@@ -56,7 +56,10 @@ Item {
     else root.svc.play(e.item.id, "", false)
   }
 
-  function textKey(t) { }
+  function textKey(t) {
+    var e = root.flat[root.cursor]
+    if (e && e.kind === "song" && root.panel) root.panel.trackKey(t, e.item)
+  }
   function tr(key, fallback) { return root.svc ? root.svc.tr(key, fallback) : fallback }
 
   Component.onCompleted: Qt.callLater(root.focusInput)
@@ -103,6 +106,8 @@ Item {
         track: modelData.kind === "song" ? modelData.item
           : { title: modelData.item.title, artist: (modelData.kind === "album" ? root.tr("search.album", "Album") : root.tr("search.playlist", "Playlist")) + "  ·  " + modelData.item.subtitle, thumb: modelData.item.thumb, dur: "" }
         showAlbum: modelData.kind === "song"
+        actions: modelData.kind === "song" && root.panel ? root.panel.trackActions : []
+        onAction: function(name) { root.panel.trackAction(name, modelData.item) }
         selected: root.cursor === index
         current: modelData.kind === "song" && root.svc && root.svc.video === modelData.item.videoId
         onActivated: { root.cursor = index; root.activate() }

@@ -937,6 +937,44 @@ class Ops:
             raise BadRequest("index")
         return {"data": self._page("queue.jump", {"index": idx})}
 
+    @staticmethod
+    def _index(arg, key):
+        v = arg.get(key)
+        if not isinstance(v, int) or isinstance(v, bool) or v < 0 or v > 10000:
+            raise BadRequest(key)
+        return v
+
+    def op_queue_add(self, arg):
+        nxt = arg.get("next", False)
+        if not isinstance(nxt, bool):
+            raise BadRequest("next")
+        return {"data": self._page("queue.add", {"video": need_id(arg, "video"), "next": nxt})}
+
+    def op_queue_remove(self, arg):
+        return {"data": self._page("queue.remove", {"index": self._index(arg, "index")})}
+
+    def op_queue_move(self, arg):
+        return {"data": self._page("queue.move", {"from": self._index(arg, "from"), "to": self._index(arg, "to")})}
+
+    def op_history(self, arg):
+        return {"data": self._page("history", {})}
+
+    def op_playlist_targets(self, arg):
+        return {"data": self._page("playlist.targets", {"video": need_id(arg, "video")})}
+
+    def op_player_fade(self, arg):
+        s = arg.get("seconds")
+        if not isinstance(s, int) or isinstance(s, bool) or s < 1 or s > 15:
+            raise BadRequest("seconds")
+        return {"data": self.att.page_call("player.fade", {"seconds": s}, timeout=s + 10) if self._ready() else None}
+
+    def _ready(self):
+        if self.att.state == "signed-out":
+            raise SignedOut()
+        if self.att.state != "ready":
+            raise NoApp()
+        return True
+
     def op_like(self, arg):
         return {"data": self._page("like", {"video": need_id(arg, "video")})}
 

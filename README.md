@@ -52,13 +52,21 @@ YouTube changes its stream formats: playback is the real player.
   wash of the album art blurred behind the whole panel.
 - **Playlists** — every playlist in your library including Liked Music; play,
   shuffle, or pick a track. Long playlists load completely.
-- **Up next** — the live queue with the current track marked; jump anywhere.
+- **Up next** — the live queue with the current track marked; jump anywhere,
+  move rows up and down, remove them. It is read from YouTube Music's own
+  queue store, so what you see is exactly what will play.
+- **Play next / add to queue** — from search, a playlist or History, by
+  keyboard or with the buttons that appear on a row.
+- **Save to playlist** — any song, or the one playing, into one of your
+  playlists; the ones that already have it are checked.
+- **History** — what you played, under YouTube Music's own day headings.
 - **Lyrics** — timed, highlighted line by line, click a line to seek; plain
   lyrics when the song has no timings.
 - **Search** — songs, albums and playlists; Enter plays.
 - **Account actions** — like, dislike, start radio from the current song.
-- Track-change notification with artwork, a sleep timer, and the app window
-  parked out of sight in a special workspace.
+- Track-change notification with artwork, a sleep timer (15 / 30 / 60 min or
+  the end of this song, fading out instead of cutting off), and the app window
+  kept out of sight in a special workspace.
 
 ## Requirements
 
@@ -116,13 +124,15 @@ in: **Open YouTube Music** brings it back.
 | In the panel | |
 |---|---|
 | `Tab` / `Shift+Tab` | cycle views |
-| `h` `n` `p` `q` `y` `/` | Home · Now playing · Playlists · Queue · Lyrics · Search |
+| `n` `p` `q` `i` `y` `/` | Now playing · Playlists · Queue · History · Lyrics · Search (Home: Tab) |
 | `↑ ↓ ← →` or `j k h l` | move; `←` backs out of a playlist; in Now playing, `←` `→` seek 10 s |
 | `Enter` / `Space` | play the selected item (Space = play/pause in Now playing; with nothing playing, it resumes the last session) |
 | `,` `.` | previous / next track |
 | `f` `d` `r` | like · dislike · start radio from the current song |
 | `t` | repeat: off → all → this song → off |
-| `x` | shuffle on / off |
+| `m` | shuffle on / off (`x` belongs to Omarchy's panel keys as "delete") |
+| `e` `E` `b` | on the selected song in Search, a playlist or History: play next · add to queue · save to playlist; in Now playing, `b` saves the playing song |
+| `Ctrl+↑` `Ctrl+↓` · `Delete` / `x` | in Up next: move the selected row · remove it (not the one playing) |
 | `a` `s` | inside a playlist: play all · shuffle |
 | `g` | queue / lyrics: jump back to the current line |
 | `R` | Home: refresh the rows |
@@ -154,6 +164,8 @@ and a few more, are available from any script through `bin/ytm`:
 ~/.config/omarchy/plugins/tiertek.ytm/bin/ytm volumeUp     # or volumeDown
 ~/.config/omarchy/plugins/tiertek.ytm/bin/ytm repeat       # or shuffle
 ~/.config/omarchy/plugins/tiertek.ytm/bin/ytm quit         # close the YouTube Music window
+~/.config/omarchy/plugins/tiertek.ytm/bin/ytm save         # save the playing song to a playlist
+~/.config/omarchy/plugins/tiertek.ytm/bin/ytm view history # or player, playlists, queue, lyrics, search
 ```
 
 ### Updating
@@ -281,6 +293,20 @@ The bridge tests never touch a browser or the network: `tests/fakecdp.py`
 speaks just enough of the DevTools protocol. InnerTube parsers are tested
 against fixtures in `tests/fixtures/innertube/`, including a scrubbed capture
 of the current flat search layout.
+
+## Credits
+
+Several pieces follow other Omarchy YouTube Music plugins, both MIT
+licensed:
+
+- [Solfa](https://github.com/SirAllap/omarchy-solfa) by SirAllap: editing
+  the queue through YouTube Music's queue store (ADD_ITEMS, REMOVE_ITEM,
+  MOVE_ITEM, SET_INDEX), the History view, recovering a crashed or stuck
+  page, the launch-time window rule, and keeping the profile on one
+  browser.
+- [YouTube Music Player](https://github.com/Dqckey/omarchy-ytmusic-player)
+  by Dqckey: the save-to-playlist picker
+  (`playlist/get_add_to_playlist`, `DEDUPE_OPTION_SKIP`).
 
 ## License
 

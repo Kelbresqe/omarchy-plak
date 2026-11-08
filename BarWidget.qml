@@ -45,6 +45,13 @@ BarWidget {
   function close() { if (panelLoader.item) panelLoader.item.close() }
   function toggle() { if (panelLoader.item) panelLoader.item.toggle() }
   function showView(name) { if (panelLoader.item) { panelLoader.item.show(name); panelLoader.item.open() } }
+  // Save the playing song to a playlist: the panel opens on the picker.
+  function saveCurrent() {
+    var p = panelLoader.item
+    if (!p || !root.svc || !root.svc.video) return
+    p.openSave({ videoId: root.svc.video, title: root.svc.title, artist: root.svc.artist })
+    p.open()
+  }
   function closeForPopoutSwitch() { if (panelLoader.item) panelLoader.item.closeForPopoutSwitch() }
 
   function injectPanel() {
@@ -80,6 +87,7 @@ BarWidget {
     function hide(): void { if (root.svc) root.svc.hideApp() }
     function launch(): void { if (root.svc) root.svc.launchApp() }
     function quit(): void { if (root.svc) root.svc.quitApp() }
+    function save(): void { root.saveCurrent() }
     function volumeUp(): void { if (root.svc) root.svc.nudgeVolume(0.05) }
     function volumeDown(): void { if (root.svc) root.svc.nudgeVolume(-0.05) }
     function repeat(): void { if (root.svc) root.svc.cycleRepeat() }

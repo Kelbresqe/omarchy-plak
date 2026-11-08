@@ -348,6 +348,40 @@ class OpsTest(Base):
             self.assertEqual(c.call("shuffle.set", on=bad)["error"], "bad-request", bad)
         self.assertEqual(len(self.browser.calls), n)   # nothing invalid reached the page
 
+    def test_queue_edits_forward_validated_args(self):
+        c = self.ready()
+        self.browser.canned.update({"queue.add": {"added": 1, "index": 5}, "queue.remove": {"removed": True},
+                                    "queue.move": {"moved": True}})
+        self.assertEqual(c.call("queue.add", video=VID, next=True)["data"], {"added": 1, "index": 5})
+        self.assertEqual(self.last_call(), ("queue.add", {"video": VID, "next": True}))
+        c.call("queue.add", video=VID)
+        self.assertEqual(self.last_call(), ("queue.add", {"video": VID, "next": False}))
+        c.call("queue.remove", index=3)
+        self.assertEqual(self.last_call(), ("queue.remove", {"index": 3}))
+        c.call("queue.move", **{"from": 2, "to": 7})
+        self.assertEqual(self.last_call(), ("queue.move", {"from": 2, "to": 7}))
+        n = len(self.browser.calls)
+        self.assertEqual(c.call("queue.add", video="x;y")["error"], "bad-id")
+        self.assertEqual(c.call("queue.add", video=VID, next="yes")["error"], "bad-request")
+        for bad in (-1, True, "3", None, 10001):
+            self.assertEqual(c.call("queue.remove", index=bad)["error"], "bad-request", bad)
+        self.assertEqual(c.call("queue.move", **{"from": 1})["error"], "bad-request")
+        self.assertEqual(len(self.browser.calls), n)   # nothing invalid reached the page
+
+    def test_history_save_targets_and_fade(self):
+        c = self.ready()
+        self.browser.canned.update({"history": {"h": 1}, "playlist.targets": {"t": 1}, "player.fade": {"faded": True}})
+        self.assertEqual(c.call("history")["data"], {"h": 1})
+        self.assertEqual(c.call("playlist.targets", video=VID)["data"], {"t": 1})
+        self.assertEqual(self.last_call(), ("playlist.targets", {"video": VID}))
+        self.assertEqual(c.call("player.fade", seconds=10)["data"], {"faded": True})
+        self.assertEqual(self.last_call(), ("player.fade", {"seconds": 10}))
+        n = len(self.browser.calls)
+        self.assertEqual(c.call("playlist.targets", video="")["error"], "bad-id")
+        for bad in (0, 16, "10", True, None):
+            self.assertEqual(c.call("player.fade", seconds=bad)["error"], "bad-request", bad)
+        self.assertEqual(len(self.browser.calls), n)
+
     def test_play_forwards_shuffle_and_follows_up(self):
         c = self.ready()
         # In-app navigation: the list is up when `play` returns, so shuffle
