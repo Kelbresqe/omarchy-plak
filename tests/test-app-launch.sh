@@ -6,7 +6,7 @@ APP="$PWD/bin/ytm-app"
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 fake="$tmp/bin"; mkdir -p "$fake"
 # Only the tools the launcher itself needs; no real browsers can leak in.
-tools="$tmp/tools"; mkdir -p "$tools"; for t in mkdir chmod printf; do ln -s "$(command -v $t)" "$tools/$t"; done
+tools="$tmp/tools"; mkdir -p "$tools"; for t in mkdir chmod printf head tr; do ln -s "$(command -v $t)" "$tools/$t"; done
 export YTM_PROFILE_DIR="$tmp/profile"
 pass=0; fail=0
 ok()   { pass=$((pass+1)); }
@@ -53,6 +53,24 @@ expected="$fake/chromium
 [ "$out" = "$expected" ] && ok || { bad "flags"; diff <(echo "$expected") <(echo "$out"); }
 echo "$out" | grep -q 9222 && bad "fixed port present" || ok
 [ -d "$YTM_PROFILE_DIR" ] && [ "$(stat -c %a "$YTM_PROFILE_DIR")" = "700" ] && ok || bad "profile dir not 0700"
+
+# 7. the browser recorded in the profile wins over a changed default
+reset; stub brave; stub chromium; xdg brave.desktop
+mkdir -p "$YTM_PROFILE_DIR"; printf 'chromium\n' > "$YTM_PROFILE_DIR/TekTube-Browser"
+out=$(run); [ "$(echo "$out" | head -1)" = "$fake/chromium" ] && ok || bad "recorded browser: got $(echo "$out" | head -1)"
+# 8. ...unless it is no longer installed
+reset; stub brave; xdg brave.desktop
+out=$(run); [ "$(echo "$out" | head -1)" = "$fake/brave" ] && ok || bad "recorded missing: got $(echo "$out" | head -1)"
+# 9. an explicit --browser beats the record
+reset; stub brave; stub chromium; xdg chromium.desktop
+out=$(run --browser brave); [ "$(echo "$out" | head -1)" = "$fake/brave" ] && ok || bad "explicit over record: got $(echo "$out" | head -1)"
+# 10. a hostile record is ignored
+reset; stub brave; stub chromium; xdg brave.desktop
+printf 'chromium; touch /tmp/x\n' > "$YTM_PROFILE_DIR/TekTube-Browser"
+out=$(run); [ "$(echo "$out" | head -1)" = "$fake/brave" ] && ok || bad "hostile record: got $(echo "$out" | head -1)"
+# --print never writes the record
+[ "$(cat "$YTM_PROFILE_DIR/TekTube-Browser")" = "chromium; touch /tmp/x" ] && ok || bad "--print rewrote the record"
+rm -f "$YTM_PROFILE_DIR/TekTube-Browser"
 
 # 6. --signin: same profile, Google's sign-in page, and no debug port
 reset; stub chromium; xdg chromium.desktop

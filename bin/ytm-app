@@ -49,6 +49,20 @@ is_family() {
   return 1
 }
 
+profile="${YTM_PROFILE_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/tiertek.ytm/profile}"
+
+# The browser that built the profile. Chrome, Brave and Chromium cannot read
+# each other's encrypted cookies, so opening the profile with another one
+# (say, after the default browser changed) silently loses the sign-in and
+# rewrites the cookie store. Stick with the recorded browser while it is
+# installed; an explicit --browser (the widget's `browser` setting) wins.
+mark="$profile/TekTube-Browser"
+recorded=""
+if [ -f "$mark" ]; then
+  recorded=$(head -c 64 "$mark" | tr -d '[:space:]')
+  if ! [[ "$recorded" =~ ^[A-Za-z0-9._-]+$ ]] || ! is_family "$recorded"; then recorded=""; fi
+fi
+
 pick=""
 if [ -n "$want" ]; then
   if ! [[ "$want" =~ ^[A-Za-z0-9._-]+$ ]] || ! is_family "$want"; then
@@ -56,6 +70,8 @@ if [ -n "$want" ]; then
     exit 3
   fi
   pick="$want"
+elif [ -n "$recorded" ] && command -v "$recorded" >/dev/null 2>&1; then
+  pick="$recorded"
 else
   # Prefer the user's default browser when it is one we can drive.
   default=$(xdg-settings get default-web-browser 2>/dev/null || true)
@@ -80,9 +96,11 @@ if [ -z "$pick" ] || ! command -v "$pick" >/dev/null 2>&1; then
 fi
 exe=$(command -v "$pick")
 
-profile="${YTM_PROFILE_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/tiertek.ytm/profile}"
 mkdir -p "$profile"
 chmod 700 "$profile"
+if [ "$print" -eq 0 ] && [ "$recorded" != "$pick" ]; then
+  printf '%s\n' "$pick" > "$mark"
+fi
 
 if [ "$signin" -eq 1 ]; then
   argv=(
