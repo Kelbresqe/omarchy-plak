@@ -132,6 +132,34 @@
     return bar ? bar.querySelector(".right-controls-buttons .shuffle") || bar.querySelector(".shuffle") : null
   }
 
+  // What the bridge remembers between browser sessions (Memory in
+  // ytm-bridge): the list the track came from, how far in, its title for the
+  // Resume button, and the settings the site forgets when its browser
+  // restarts (repeat, shuffle) or that the panel shows before the page
+  // answers (volume). Every field is optional; the bridge validates them.
+  function sessionInfo() {
+    const ok = v => typeof v === "string" && /^[A-Za-z0-9_-]{2,64}$/.test(v)
+    const out = { list: "", time: 0, title: "", artist: "", repeat: repeatMode(), shuffle: shuffleOn(), volume: null }
+    try {
+      const mp = document.getElementById("movie_player")
+      if (mp && typeof mp.getCurrentTime === "function") out.time = Math.max(0, Math.floor(Number(mp.getCurrentTime()) || 0))
+      const pl = mp && typeof mp.getPlaylistId === "function" ? mp.getPlaylistId() : ""
+      if (ok(pl)) out.list = pl
+      const data = mp && typeof mp.getVideoData === "function" ? mp.getVideoData() : null
+      if (data) {
+        out.title = String(data.title || "").slice(0, 200)
+        out.artist = String(data.author || "").slice(0, 200)
+      }
+    } catch (e) { /* player not up yet */ }
+    if (!out.list) {
+      const l = new URLSearchParams(location.search).get("list")
+      if (ok(l)) out.list = l
+    }
+    const s = volumeSlider()
+    if (s) out.volume = Number(s.value)
+    return out
+  }
+
   // Polymer elements expose their renderer JSON as `.data`; the queue items
   // carry the same playlistPanelVideoRenderer shape the `next` endpoint uses,
   // so the parser in Ytm.js handles both without knowing which one it got.
@@ -172,7 +200,16 @@
 
   const ops = {
     async state() {
-      return { loggedIn: !!cfg("LOGGED_IN"), video: currentVideo() }
+      return { loggedIn: !!cfg("LOGGED_IN"), video: currentVideo(), session: sessionInfo() }
+    },
+
+    // Seek once the requested track is the one loaded (Resume navigates
+    // first); `seeked` is false while another track is still up.
+    async "player.seek"(arg) {
+      const mp = document.getElementById("movie_player")
+      if (!mp || typeof mp.seekTo !== "function" || currentVideo() !== arg.video) return { seeked: false }
+      mp.seekTo(arg.t, true)
+      return { seeked: true }
     },
 
     async now() {

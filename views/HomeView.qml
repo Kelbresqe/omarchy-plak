@@ -28,19 +28,45 @@ Item {
     if (sh && sh.items[root.col]) root.svc.playItem(sh.items[root.col])
   }
   function textKey(t) { if (t === "R" && root.svc) root.svc.loadHome() }
+  function tr(key, fallback) { return root.svc ? root.svc.tr(key, fallback) : fallback }
+
+  // Where the last session left off, while nothing is playing.
+  readonly property var resume: root.svc && !root.svc.hasMedia ? root.svc.resume : null
 
   Text {
     anchors.centerIn: parent
     visible: root.shelves.length === 0
     textFormat: Text.PlainText
-    text: root.svc && root.svc.homeLoading ? "Loading your home…" : "Nothing here yet"
+    text: root.svc && root.svc.homeLoading ? root.tr("home.loading", "Loading your home…") : root.tr("home.empty", "Nothing here yet")
     color: Color.foreground; opacity: 0.5
     font.family: root.family; font.pixelSize: Style.font.body
   }
 
+  Button {
+    id: resumeButton
+    anchors.top: parent.top
+    anchors.left: parent.left
+    width: Math.min(implicitWidth, parent.width)
+    visible: root.resume !== null
+    height: visible ? implicitHeight : 0
+    iconText: "\u{F040A}"
+    // The title is appended, not passed through .arg(): a "%2" in a song
+    // title would otherwise be filled in too.
+    text: root.resume ? root.tr("resume.label", "Resume where you left off") + "  ·  "
+      + root.resume.title + (root.resume.artist ? " — " + root.resume.artist : "")
+      + "  (" + Math.floor(root.resume.time / 60) + ":" + ("0" + root.resume.time % 60).slice(-2) + ")" : ""
+    bordered: true
+    fontFamily: root.family
+    onClicked: root.svc.resumePlay()
+  }
+
   ListView {
     id: rows
-    anchors.fill: parent
+    anchors.top: resumeButton.bottom
+    anchors.topMargin: resumeButton.visible ? Style.space(8) : 0
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
     clip: true
     model: root.shelves
     spacing: Style.space(8)

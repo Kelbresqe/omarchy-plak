@@ -11,9 +11,16 @@ Item {
   property string family: Style.font.family
   readonly property bool inputActive: false
 
-  function move(dx, dy) { }
-  function activate() { if (svc) svc.togglePlaying() }
+  // ← / → seek 10 s. Enter / Space resumes the last session while nothing
+  // plays, and toggles playback otherwise.
+  function move(dx, dy) { if (svc && dx !== 0) svc.seekBy(dx * 10) }
+  function activate() {
+    if (!svc) return
+    if (!svc.hasMedia && svc.resume) svc.resumePlay()
+    else svc.togglePlaying()
+  }
   function textKey(t) { }
+  function tr(key, fallback) { return root.svc ? root.svc.tr(key, fallback) : fallback }
 
   Component.onCompleted: if (svc) svc.cavaWanted = true
   Component.onDestruction: if (svc) svc.cavaWanted = false
@@ -181,7 +188,7 @@ Item {
       Text {
         width: parent.width
         textFormat: Text.PlainText
-        text: root.svc && root.svc.title ? root.svc.title : "Nothing playing"
+        text: root.svc && root.svc.title ? root.svc.title : root.tr("common.nothingPlaying", "Nothing playing")
         color: Color.foreground
         font.family: root.family
         font.pixelSize: Style.font.subtitle
@@ -209,6 +216,18 @@ Item {
         font.pixelSize: Style.font.bodySmall
         elide: Text.ElideRight
         visible: text !== ""
+      }
+      // Nothing playing: offer where the last session left off.
+      Button {
+        readonly property var resume: root.svc && !root.svc.hasMedia ? root.svc.resume : null
+        visible: resume !== null
+        width: Math.min(implicitWidth, parent.width)
+        iconText: "\u{F040A}"
+        text: resume ? root.tr("resume.label", "Resume where you left off") : ""
+        tooltipText: resume ? resume.title + (resume.artist ? " — " + resume.artist : "") : ""
+        bordered: true
+        fontFamily: root.family
+        onClicked: root.svc.resumePlay()
       }
       Item { width: 1; height: Style.space(6) }
 
@@ -250,7 +269,7 @@ Item {
           for (var i = q.current + 1; i < q.items.length && q.current >= 0; i++) {
             if (!cur || norm(q.items[i].title) !== norm(cur.title)) { next = q.items[i]; break }
           }
-          return next ? "Up next:  " + next.title + (next.artist ? "  ·  " + next.artist : "") : ""
+          return next ? root.tr("player.upNext", "Up next:") + "  " + next.title + (next.artist ? "  ·  " + next.artist : "") : ""
         }
         color: Color.foreground
         opacity: 0.5
@@ -262,7 +281,9 @@ Item {
       Text {
         width: parent.width
         textFormat: Text.PlainText
-        text: "Space\u00a0play/pause  ·  ,\u00a0.\u00a0prev/next  ·  f\u00a0like  ·  r\u00a0radio  ·  t\u00a0repeat  ·  x\u00a0shuffle  ·  Tab\u00a0views"
+        // Key/label pairs are joined with no-break spaces (also in the
+        // catalogs) so they never wrap apart.
+        text: root.tr("player.keys", "Space\u00a0play/\u2060pause  ·  ,\u00a0.\u00a0prev/\u2060next  ·  ←\u00a0→\u00a0seek  ·  f\u00a0like  ·  r\u00a0radio  ·  t\u00a0repeat  ·  x\u00a0shuffle  ·  Tab\u00a0views")
         color: Color.foreground
         opacity: 0.35
         font.family: root.family

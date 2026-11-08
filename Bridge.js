@@ -64,16 +64,17 @@ function reduce(state, input) {
   return next
 }
 
-// A human line for each state, and the single action that fixes it.
+// A human line for each state, and the single action that fixes it. `key`
+// names the line in i18n/*.json; `text` is the English fallback.
 function describe(app, link) {
-  if (link !== "up" || app === "bridge-down") return { text: "Starting the bridge…", action: "" }
-  if (app === "no-app") return { text: "YouTube Music is not open", action: "launch" }
-  if (app === "attaching") return { text: "Connecting to YouTube Music…", action: "" }
+  if (link !== "up" || app === "bridge-down") return { key: "state.starting", text: "Starting the bridge…", action: "" }
+  if (app === "no-app") return { key: "state.noApp", text: "YouTube Music is not open", action: "launch" }
+  if (app === "attaching") return { key: "state.attaching", text: "Connecting to YouTube Music…", action: "" }
   // Google refuses to sign in the remote-controlled app window, so signing in
   // goes through a plain browser window (bridge op app.signin).
-  if (app === "signed-out") return { text: "Not signed in to YouTube Music", action: "signin" }
-  if (app === "signing-in") return { text: "Sign in in the Google window, then close it. TekTube reopens by itself.", action: "" }
-  return { text: "", action: "" }
+  if (app === "signed-out") return { key: "state.signedOut", text: "Not signed in to YouTube Music", action: "signin" }
+  if (app === "signing-in") return { key: "state.signingIn", text: "Sign in in the Google window, then close it. TekTube reopens by itself.", action: "" }
+  return { key: "", text: "", action: "" }
 }
 
 if (typeof module !== "undefined") {

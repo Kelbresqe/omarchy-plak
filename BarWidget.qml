@@ -219,7 +219,8 @@ BarWidget {
     }
     onEntered: if (root.bar) root.bar.showTooltip(root, root.hasMedia
       ? root.title + (root.artist ? " — " + root.artist : "")
-      : (root.svc && root.svc.app === "ready" ? "TekTube · nothing playing" : "TekTube · click to open"))
+      : (root.svc && root.svc.app === "ready" ? root.svc.tr("bar.nothingPlaying", "TekTube · nothing playing")
+         : root.svc ? root.svc.tr("bar.clickToOpen", "TekTube · click to open") : "TekTube"))
     onExited: if (root.bar) root.bar.hideTooltip(root)
   }
 }

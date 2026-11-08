@@ -65,14 +65,23 @@ class Client:
 class Base(unittest.TestCase):
     launcher = "/bin/true"
 
+    memory = None          # dict to pre-seed session.json with, before the bridge starts
+
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.profile = os.path.join(self.tmp, "profile")
         self.sockpath = os.path.join(self.tmp, "b.sock")
+        # Always a private state file: the default is the user's real one.
+        self.state_file = os.path.join(self.tmp, "state", "session.json")
+        if self.memory is not None:
+            os.makedirs(os.path.dirname(self.state_file))
+            with open(self.state_file, "w") as f:
+                json.dump(self.memory, f)
         self.browser = FakeBrowser(self.profile)
-        env = dict(os.environ, YTM_POLL_MS="100", YTM_CLOSE_WAIT_S="0.5")
+        env = dict(os.environ, YTM_POLL_MS="100", YTM_CLOSE_WAIT_S="0.5", XDG_STATE_HOME=os.path.join(self.tmp, "xdg-state"))
         self.proc = subprocess.Popen([sys.executable, BRIDGE, "--socket", self.sockpath, "--profile", self.profile,
-                                      "--launcher", self.launcher, "--cache", os.path.join(self.tmp, "cache")], env=env, stderr=subprocess.PIPE)
+                                      "--launcher", self.launcher, "--cache", os.path.join(self.tmp, "cache"),
+                                      "--state-file", self.state_file], env=env, stderr=subprocess.PIPE)
         for _ in range(50):
             if os.path.exists(self.sockpath):
                 break
@@ -484,6 +493,107 @@ class WebSocketLimitTest(unittest.TestCase):
         ws.close()
 
 
+VID = "dQw4w9WgXcQ"
+LIST = "PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf"
+
+
+class MemoryTest(unittest.TestCase):
+    def setUp(self):
+        self.path = os.path.join(tempfile.mkdtemp(), "state", "session.json")
+
+    def saved(self):
+        with open(self.path) as f:
+            return json.load(f)
+
+    def test_clean_keeps_only_valid_fields(self):
+        self.assertEqual(bridge.Memory._clean({"video": "bad id!", "repeat": "SOME", "shuffle": "yes", "volume": 300}), {})
+        self.assertEqual(
+            bridge.Memory._clean({"video": VID, "list": "x;y", "time": -1, "title": 5, "repeat": "ALL",
+                                  "shuffle": False, "volume": 55.4}),
+            {"video": VID, "list": "", "time": 0, "title": "", "artist": "", "repeat": "ALL", "shuffle": False, "volume": 55})
+        self.assertEqual(bridge.Memory._clean(["not", "a", "dict"]), {})
+
+    def test_bad_file_reads_as_empty(self):
+        os.makedirs(os.path.dirname(self.path))
+        with open(self.path, "w") as f:
+            f.write("{not json")
+        self.assertEqual(bridge.Memory(self.path).get(), {})
+
+    def test_position_only_changes_are_throttled(self):
+        m = bridge.Memory(self.path)
+        m.note(VID, {"time": 10, "repeat": "NONE"})
+        self.assertEqual(self.saved()["time"], 10)
+        self.assertEqual(os.stat(self.path).st_mode & 0o777, 0o600)
+        m.note(VID, {"time": 12, "repeat": "NONE"})          # only the position moved: not written yet
+        self.assertEqual((self.saved()["time"], m.get()["time"]), (10, 12))
+        m.note(VID, {"time": 13, "repeat": "ALL"})           # a setting changed: written at once
+        self.assertEqual((self.saved()["time"], self.saved()["repeat"]), (13, "ALL"))
+        m.note("", {"time": 99})                             # nothing playing: ignored
+        self.assertEqual(m.get()["time"], 13)
+
+
+class MemoryOpsTest(Base):
+    memory = {"video": VID, "list": LIST, "time": 95, "title": "Song", "artist": "Artist",
+              "repeat": "ONE", "shuffle": True, "volume": 40}
+
+    def calls_of(self, op):
+        return [p["arguments"][1]["value"] for p in self.browser.calls if p["arguments"][0]["value"] == op]
+
+    def ready(self):
+        c = Client(self.sockpath)
+        self.browser.write_port_file()
+        self.wait_state(c, "ready")
+        return c
+
+    def test_state_carries_last_settings(self):
+        c = Client(self.sockpath)
+        self.assertEqual(c.call("state")["memo"], {"volume": 40, "repeat": "ONE", "shuffle": True})
+
+    def test_resume_offered_only_while_nothing_plays(self):
+        c = self.ready()
+        self.assertEqual(c.call("resume.get")["resume"],
+                         {"video": VID, "list": LIST, "time": 95, "title": "Song", "artist": "Artist"})
+        self.browser.canned["state"] = {"loggedIn": True, "video": "oHg5SJYRHA0"}
+        end = time.time() + 5
+        while c.call("state")["video"] != "oHg5SJYRHA0" and time.time() < end:
+            time.sleep(0.1)
+        self.assertIsNone(c.call("resume.get")["resume"])
+
+    def test_resume_plays_the_list_then_seeks(self):
+        c = self.ready()
+        self.browser.canned.update({"play": {"navigated": True}, "player.seek": {"seeked": True}})
+        self.assertTrue(c.call("resume.play")["resumed"])
+        self.assertEqual(self.calls_of("play")[-1], {"video": VID, "list": LIST, "shuffle": False})
+        self.assertEqual(self.calls_of("player.seek")[-1], {"video": VID, "t": 95})
+
+    def test_restores_repeat_and_shuffle_once_when_playback_starts(self):
+        c = Client(self.sockpath)
+        session = {"repeat": "NONE", "shuffle": False, "time": 3, "list": "", "title": "Song", "artist": "Artist", "volume": 40}
+        self.browser.canned.update({"repeat.set": {"mode": "ONE"}, "shuffle.set": {"on": True},
+                                    "state": {"loggedIn": True, "video": VID, "session": session}})
+        self.browser.write_port_file()
+        c.wait_event("player")
+        # The page now reports what was restored; later polls must not restore again.
+        self.browser.canned["state"] = {"loggedIn": True, "video": VID, "session": dict(session, repeat="ONE", shuffle=True)}
+        time.sleep(0.6)
+        self.assertEqual(self.calls_of("repeat.set"), [{"mode": "ONE"}])
+        self.assertEqual(self.calls_of("shuffle.set"), [{"on": True}])
+        with open(self.state_file) as f:
+            saved = json.load(f)
+        self.assertEqual((saved["repeat"], saved["shuffle"], saved["video"]), ("ONE", True, VID))
+
+    def test_user_choice_in_this_session_is_not_overridden(self):
+        c = Client(self.sockpath)
+        session = {"repeat": "ALL", "shuffle": False, "time": 3}     # user already picked ALL
+        self.browser.canned.update({"repeat.set": {"mode": "ONE"}, "shuffle.set": {"on": True},
+                                    "state": {"loggedIn": True, "video": VID, "session": session}})
+        self.browser.write_port_file()
+        self.wait_state(c, "ready")
+        time.sleep(0.5)
+        self.assertEqual(self.calls_of("repeat.set"), [])            # ALL is kept
+        self.assertEqual(self.calls_of("shuffle.set"), [{"on": True}])
+
+
 class SelfWatchTest(unittest.TestCase):
     """The daemon exits on its own when its code changes or when a newer
     daemon takes over the socket, and never unlinks a socket it lost."""
@@ -505,10 +615,11 @@ class SelfWatchTest(unittest.TestCase):
                 p.wait(3)
 
     def start(self):
-        env = dict(os.environ, YTM_POLL_MS="100", YTM_SELF_CHECK_S="0.2")
+        env = dict(os.environ, YTM_POLL_MS="100", YTM_SELF_CHECK_S="0.2", XDG_STATE_HOME=os.path.join(self.tmp, "xdg-state"))
         p = subprocess.Popen([sys.executable, os.path.join(self.bin, "ytm-bridge"), "--socket", self.sockpath,
                               "--profile", os.path.join(self.tmp, "profile"), "--launcher", "/bin/true",
-                              "--cache", os.path.join(self.tmp, "cache")], env=env, stderr=subprocess.DEVNULL)
+                              "--cache", os.path.join(self.tmp, "cache"),
+                              "--state-file", os.path.join(self.tmp, "session.json")], env=env, stderr=subprocess.DEVNULL)
         self.procs.append(p)
         end = time.time() + 5
         while time.time() < end:
@@ -534,7 +645,9 @@ class SelfWatchTest(unittest.TestCase):
         new = self.start()                        # rebinds the same path
         self.assertEqual(old.wait(5), 0)
         self.assertIsNone(new.poll())
-        self.assertTrue(Client(self.sockpath).call("state")["ok"])   # the old one did not unlink it
+        c = Client(self.sockpath)                 # the old one did not unlink it
+        self.assertTrue(c.call("state")["ok"])
+        c.close()
 
 
 class CheckIdTest(unittest.TestCase):

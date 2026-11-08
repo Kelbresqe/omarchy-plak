@@ -253,6 +253,93 @@ class Cdp:
         self.ws.close()
 
 
+# ---------------------------------------------------------------- memory
+
+REPEAT_MODES = ("NONE", "ALL", "ONE")
+
+
+class Memory:
+    """What TekTube remembers between browser sessions, in
+    $XDG_STATE_HOME/tiertek.ytm/session.json (0600): the last track, the list
+    it came from and how far in (for Resume), and repeat / shuffle, which
+    YouTube Music forgets when its browser restarts, plus the volume so the
+    panel can show its controls before the page answers. Everything read
+    back is validated again; a bad file is treated as empty."""
+
+    WRITE_EVERY_S = 15        # position drift alone is saved this often
+
+    def __init__(self, path):
+        self.path = path
+        self.lock = threading.Lock()
+        self.data = self._clean(self._load())
+        self._written_at = 0.0
+
+    def _load(self):
+        try:
+            with open(self.path, encoding="utf-8") as f:
+                return json.loads(f.read(64 * 1024))
+        except (OSError, ValueError):
+            return {}
+
+    @staticmethod
+    def _clean(d):
+        if not isinstance(d, dict):
+            return {}
+        out = {}
+        v = d.get("video")
+        if isinstance(v, str) and VALID_ID.match(v):
+            out["video"] = v
+            lst = d.get("list")
+            out["list"] = lst if isinstance(lst, str) and VALID_ID.match(lst) else ""
+            t = d.get("time")
+            out["time"] = t if isinstance(t, int) and not isinstance(t, bool) and 0 <= t <= 24 * 3600 else 0
+            for k in ("title", "artist"):
+                s = d.get(k)
+                out[k] = s[:200] if isinstance(s, str) else ""
+        if d.get("repeat") in REPEAT_MODES:
+            out["repeat"] = d["repeat"]
+        if isinstance(d.get("shuffle"), bool):
+            out["shuffle"] = d["shuffle"]
+        vol = d.get("volume")
+        if isinstance(vol, (int, float)) and not isinstance(vol, bool) and 0 <= vol <= 100:
+            out["volume"] = int(round(vol))
+        return out
+
+    def get(self):
+        with self.lock:
+            return dict(self.data)
+
+    def note(self, video, info):
+        """Record what the page reports while something is playing."""
+        if not video or not isinstance(info, dict):
+            return
+        new = dict(info, video=video)
+        if isinstance(new.get("time"), float):
+            new["time"] = int(new["time"])
+        new = self._clean(new)
+        with self.lock:
+            old = self.data
+            if new == old:
+                return
+            moved_only = {k: v for k, v in new.items() if k != "time"} == {k: v for k, v in old.items() if k != "time"}
+            self.data = new
+            if moved_only and time.time() - self._written_at < self.WRITE_EVERY_S:
+                return
+            self._write(new)
+
+    def _write(self, data):
+        try:
+            os.makedirs(os.path.dirname(self.path), mode=0o700, exist_ok=True)
+            tmp = self.path + ".tmp"
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+            os.replace(tmp, self.path)
+            self._written_at = time.time()
+        except OSError as e:
+            log("memory write failed", e)
+
+
 # ---------------------------------------------------------------- attacher
 
 class Attacher:
@@ -260,9 +347,12 @@ class Attacher:
     browser does. State is one of no-app / signing-in / attaching /
     signed-out / ready."""
 
-    def __init__(self, profile, on_state, on_track=None, signin_marker=None):
+    def __init__(self, profile, on_state, on_track=None, signin_marker=None, memory=None, on_player=None):
         self.profile = profile
         self.signin_marker = signin_marker
+        self.memory = memory
+        self.on_player = on_player or (lambda: None)
+        self.restore_pending = False   # set on each attach, cleared once settings are restored
         self.on_state = on_state
         self.on_track = on_track or (lambda v: None)
         self.state = "no-app"
@@ -413,6 +503,7 @@ class Attacher:
         cdp.call("Runtime.evaluate", {"expression": self.page_js, "returnByValue": True}, session=session)
         with self.lock:
             self.cdp, self.session, self.target = cdp, session, page["targetId"]
+        self.restore_pending = True
         self._refresh_login()
         return True
 
@@ -425,6 +516,37 @@ class Attacher:
             return
         self._set("ready" if st and st.get("loggedIn") else "signed-out")
         self._note_video(st)
+        self._remember(st)
+
+    def _remember(self, st):
+        """Once per attach, when something first plays, put back the repeat /
+        shuffle the last session ended with (the site starts every browser
+        session at NONE / off; a value the user already changed is left
+        alone). Then keep the memory current."""
+        if not self.memory or self.state != "ready" or not self.video:
+            return
+        info = (st or {}).get("session")
+        if not isinstance(info, dict):
+            return
+        info = dict(info)
+        if self.restore_pending:
+            self.restore_pending = False
+            want = self.memory.get()
+            changed = False
+            try:
+                if want.get("repeat") in ("ALL", "ONE") and info.get("repeat") == "NONE":
+                    r = self.page_call("repeat.set", {"mode": want["repeat"]}) or {}
+                    info["repeat"] = r.get("mode", info.get("repeat"))
+                    changed = True
+                if want.get("shuffle") is True and info.get("shuffle") is False:
+                    r = self.page_call("shuffle.set", {"on": True}) or {}
+                    info["shuffle"] = r.get("on", info.get("shuffle"))
+                    changed = True
+            except (CdpError, PageError) as e:
+                log("restore failed", e)
+            if changed:
+                self.on_player()
+        self.memory.note(self.video, info)
 
     def _note_video(self, st):
         v = str((st or {}).get("video") or "")
@@ -544,7 +666,42 @@ class Ops:
 
     # -- unauthenticated --------------------------------------------
     def op_state(self, arg):
-        return {"state": self.att.state, "pid": self.att.browser_pid(), "video": self.att.video}
+        out = {"state": self.att.state, "pid": self.att.browser_pid(), "video": self.att.video}
+        if self.att.memory:
+            # Last known settings, so the panel can show its controls before
+            # the page answers.
+            m = self.att.memory.get()
+            out["memo"] = {k: m[k] for k in ("volume", "repeat", "shuffle") if k in m}
+        return out
+
+    def op_resume_get(self, arg):
+        """The track to resume, while nothing is playing; else null."""
+        m = self.att.memory.get() if self.att.memory else {}
+        if self.att.video or not m.get("video"):
+            return {"resume": None}
+        return {"resume": {k: m.get(k) for k in ("video", "list", "time", "title", "artist")}}
+
+    def op_resume_play(self, arg):
+        """Play the remembered track in its list and seek to where it was."""
+        m = self.att.memory.get() if self.att.memory else {}
+        if not m.get("video"):
+            return {"resumed": False}
+        gen = self.att.nav_gen
+        a = {"video": m["video"], "list": m.get("list") or None, "shuffle": False}
+        self._page("play", a)
+        t = m.get("time", 0)
+        if t >= 5:
+            deadline = time.time() + 15
+            while time.time() < deadline and (self.att.nav_gen == gen or self.att.state != "ready"):
+                time.sleep(0.2)
+            for _ in range(20):
+                try:
+                    if self._page("player.seek", {"video": m["video"], "t": t}).get("seeked"):
+                        break
+                except (CdpError, PageError, NoApp, SignedOut):
+                    pass
+                time.sleep(0.5)
+        return {"resumed": True}
 
     def op_app_launch(self, arg):
         with self.launch_lock:
@@ -947,6 +1104,7 @@ def main():
     ap.add_argument("--socket", default=os.path.join(xdg("XDG_RUNTIME_DIR", "/tmp"), "tiertek.ytm.sock"))
     ap.add_argument("--profile", default=os.path.join(xdg("XDG_DATA_HOME", "~/.local/share"), "tiertek.ytm", "profile"))
     ap.add_argument("--cache", default=os.path.join(xdg("XDG_CACHE_HOME", "~/.cache"), "tiertek.ytm"))
+    ap.add_argument("--state-file", default=os.path.join(xdg("XDG_STATE_HOME", "~/.local/state"), "tiertek.ytm", "session.json"))
     ap.add_argument("--launcher", default=os.path.join(HERE, "ytm-app"))
     ap.add_argument("--once", nargs="+", metavar=("OP", "JSON"))
     ap.add_argument("--check-id")
@@ -980,7 +1138,14 @@ def main():
         if s:
             s.broadcast({"ev": "track", "video": video})
 
-    att = Attacher(args.profile, on_state, on_track, signin_marker=args.socket + ".signin")
+    def on_player():
+        # Repeat / shuffle were restored behind the panel's back.
+        s = server_ref.get("s")
+        if s:
+            s.broadcast({"ev": "player"})
+
+    att = Attacher(args.profile, on_state, on_track, signin_marker=args.socket + ".signin",
+                   memory=Memory(args.state_file), on_player=on_player)
     ops = Ops(att, args.launcher, args.cache)
     server = Server(args.socket, ops)
     server_ref["s"] = server

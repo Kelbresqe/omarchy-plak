@@ -57,6 +57,7 @@ Item {
   }
 
   function textKey(t) { }
+  function tr(key, fallback) { return root.svc ? root.svc.tr(key, fallback) : fallback }
 
   Component.onCompleted: Qt.callLater(root.focusInput)
 
@@ -67,7 +68,7 @@ Item {
     TextField {
       id: field
       width: parent.width
-      placeholderText: "Search songs, albums, playlists…"
+      placeholderText: root.tr("search.placeholder", "Search songs, albums, playlists…")
       font.family: root.family
       onAccepted: { root.run(text); list.forceActiveFocus() }
       Keys.onPressed: function(event) {
@@ -81,7 +82,7 @@ Item {
     Text {
       textFormat: Text.PlainText
       visible: root.loading || (root.lastQuery !== "" && root.flat.length === 0)
-      text: root.loading ? "Searching…" : "No results"
+      text: root.loading ? root.tr("search.searching", "Searching…") : root.tr("search.none", "No results")
       color: Color.foreground; opacity: 0.5
       font.family: root.family; font.pixelSize: Style.font.caption
     }
@@ -100,7 +101,7 @@ Item {
         width: list.width
         family: root.family
         track: modelData.kind === "song" ? modelData.item
-          : { title: modelData.item.title, artist: (modelData.kind === "album" ? "Album  ·  " : "Playlist  ·  ") + modelData.item.subtitle, thumb: modelData.item.thumb, dur: "" }
+          : { title: modelData.item.title, artist: (modelData.kind === "album" ? root.tr("search.album", "Album") : root.tr("search.playlist", "Playlist")) + "  ·  " + modelData.item.subtitle, thumb: modelData.item.thumb, dur: "" }
         showAlbum: modelData.kind === "song"
         selected: root.cursor === index
         current: modelData.kind === "song" && root.svc && root.svc.video === modelData.item.videoId

@@ -22,6 +22,7 @@ Item {
   }
   function activate() { if (root.cursor >= 0) root.svc.queueJump(root.cursor) }
   function textKey(t) { if (t === "g") { root.cursor = root.queue.current; list.positionViewAtIndex(Math.max(0, root.queue.current), ListView.Center) } }
+  function tr(key, fallback) { return root.svc ? root.svc.tr(key, fallback) : fallback }
 
   Component.onCompleted: Qt.callLater(function() { if (root.queue.current >= 0) list.positionViewAtIndex(root.queue.current, ListView.Center) })
 
@@ -29,7 +30,7 @@ Item {
     anchors.centerIn: parent
     visible: root.queue.items.length === 0
     textFormat: Text.PlainText
-    text: "Nothing queued — start a playlist"
+    text: root.tr("queue.empty", "Nothing queued — start a playlist")
     color: Color.foreground; opacity: 0.5
     font.family: root.family; font.pixelSize: Style.font.body
   }
@@ -39,8 +40,9 @@ Item {
     spacing: Style.space(6)
     Text {
       textFormat: Text.PlainText
-      text: root.queue.items.length > 0
-        ? "Up next  ·  " + root.queue.items.length + " tracks  ·  g jumps to the current one"
+      text: root.queue.items.length > 0 && root.svc
+        ? root.svc.trn("queue.header", root.queue.items.length, "Up next  ·  %1 tracks  ·  g jumps to the current one")
+            .arg(I18n.formatNumber(root.queue.items.length))
         : ""
       color: Color.foreground; opacity: 0.5
       font.family: root.family; font.pixelSize: Style.font.caption

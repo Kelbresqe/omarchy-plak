@@ -24,6 +24,7 @@ Item {
   function move(dx, dy) { root.userScrolled = true; list.contentY = Math.max(0, Math.min(list.contentHeight - list.height, list.contentY + dy * Style.space(40))) }
   function activate() { if (svc) svc.togglePlaying() }
   function textKey(t) { if (t === "g") { root.userScrolled = false; root.follow() } }
+  function tr(key, fallback) { return root.svc ? root.svc.tr(key, fallback) : fallback }
 
   function follow() {
     if (root.userScrolled || root.current < 0) return
@@ -44,9 +45,9 @@ Item {
     horizontalAlignment: Text.AlignHCenter
     wrapMode: Text.Wrap
     text: {
-      if (!root.svc || !root.svc.video) return "Nothing playing"
-      if (root.svc.lyricsLoading) return "Looking up lyrics…"
-      return "No lyrics for this track"
+      if (!root.svc || !root.svc.video) return root.tr("common.nothingPlaying", "Nothing playing")
+      if (root.svc.lyricsLoading) return root.tr("lyrics.loading", "Looking up lyrics…")
+      return root.tr("lyrics.none", "No lyrics for this track")
     }
     color: Color.foreground; opacity: 0.5
     font.family: root.family; font.pixelSize: Style.font.body

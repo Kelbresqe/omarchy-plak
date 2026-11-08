@@ -20,6 +20,7 @@ Column {
     var m = Math.floor(sec / 60), s = sec % 60
     return m + ":" + (s < 10 ? "0" : "") + s
   }
+  function tr(key, fallback) { return root.svc ? root.svc.tr(key, fallback) : fallback }
 
   Row {
     width: parent.width
@@ -69,7 +70,7 @@ Column {
       PanelActionButton {
         iconText: root.svc && root.svc.liked === "LIKE" ? "\u{F0513}" : "\u{F0514}"
         foreground: root.svc && root.svc.liked === "LIKE" ? Color.accent : Color.foreground
-        tooltipText: "Like (f)"
+        tooltipText: root.tr("transport.like", "Like (f)")
         fontFamily: root.family
         enabled: root.svc && root.svc.ready && root.svc.video !== ""
         onClicked: root.svc.toggleLike()
@@ -77,14 +78,14 @@ Column {
       PanelActionButton {
         iconText: root.svc && root.svc.liked === "DISLIKE" ? "\u{F0511}" : "\u{F0512}"
         foreground: root.svc && root.svc.liked === "DISLIKE" ? Color.urgent : Color.foreground
-        tooltipText: "Dislike (d)"
+        tooltipText: root.tr("transport.dislike", "Dislike (d)")
         fontFamily: root.family
         enabled: root.svc && root.svc.ready && root.svc.video !== ""
         onClicked: root.svc.dislike()
       }
       PanelActionButton {
         iconText: "\u{F043B}"
-        tooltipText: "Start radio from this song (r)"
+        tooltipText: root.tr("transport.radio", "Start radio from this song (r)")
         fontFamily: root.family
         enabled: root.svc && root.svc.ready && root.svc.video !== ""
         onClicked: root.svc.radio(root.svc.video)
@@ -97,14 +98,14 @@ Column {
       spacing: Style.space(6)
       PanelActionButton {
         iconText: "\u{F04AE}"
-        tooltipText: "Previous (,)"
+        tooltipText: root.tr("transport.previous", "Previous (,)")
         fontFamily: root.family
         enabled: root.player && root.player.canGoPrevious
         onClicked: root.svc.previous()
       }
       PanelActionButton {
         iconText: root.player && root.player.isPlaying ? "\u{F03E4}" : "\u{F040A}"
-        tooltipText: root.player && root.player.isPlaying ? "Pause (Space)" : "Play (Space)"
+        tooltipText: root.player && root.player.isPlaying ? root.tr("transport.pause", "Pause (Space)") : root.tr("transport.play", "Play (Space)")
         fontFamily: root.family
         fontSize: Style.font.display
         size: Style.space(30)
@@ -113,7 +114,7 @@ Column {
       }
       PanelActionButton {
         iconText: "\u{F04AD}"
-        tooltipText: "Next (.)"
+        tooltipText: root.tr("transport.next", "Next (.)")
         fontFamily: root.family
         enabled: root.player && root.player.canGoNext
         onClicked: root.svc.next()
@@ -129,18 +130,21 @@ Column {
         readonly property bool on: root.svc ? root.svc.shuffleOn : false
         iconText: "\u{F049D}"
         foreground: on ? Color.accent : Color.foreground
-        tooltipText: on ? "Shuffle: on (x)" : "Shuffle: off (x)"
+        tooltipText: on ? root.tr("transport.shuffleOn", "Shuffle: on (x)") : root.tr("transport.shuffleOff", "Shuffle: off (x)")
         fontFamily: root.family
-        visible: root.svc && root.svc.shuffleSupported
+        visible: root.svc && root.svc.shuffleKnown
+        enabled: root.svc && root.svc.shuffleSupported
         onClicked: root.svc.toggleShuffle()
       }
       PanelActionButton {
         readonly property string mode: root.svc ? root.svc.repeatMode : ""
         iconText: mode === "ONE" ? "\u{F0458}" : mode === "ALL" ? "\u{F0456}" : "\u{F0457}"
         foreground: mode === "ALL" || mode === "ONE" ? Color.accent : Color.foreground
-        tooltipText: mode === "ONE" ? "Repeat: this song (t)" : mode === "ALL" ? "Repeat: all (t)" : "Repeat: off (t)"
+        tooltipText: mode === "ONE" ? root.tr("transport.repeatOne", "Repeat: this song (t)")
+          : mode === "ALL" ? root.tr("transport.repeatAll", "Repeat: all (t)") : root.tr("transport.repeatOff", "Repeat: off (t)")
         fontFamily: root.family
-        visible: root.svc && root.svc.repeatSupported
+        visible: root.svc && root.svc.repeatKnown
+        enabled: root.svc && root.svc.repeatSupported
         onClicked: root.svc.cycleRepeat()
       }
       Text {
@@ -149,13 +153,14 @@ Column {
         text: "\u{F057E}"
         color: Color.foreground; opacity: 0.6
         font.family: root.family; font.pixelSize: Style.font.icon
-        visible: root.svc && root.svc.volumeSupported
+        visible: root.svc && root.svc.volumeKnown
       }
       PanelSlider {
         width: Style.space(70)
         anchors.verticalCenter: parent.verticalCenter
         bar: root.bar
-        visible: root.svc && root.svc.volumeSupported
+        visible: root.svc && root.svc.volumeKnown
+        enabled: root.svc && root.svc.volumeSupported
         value: root.svc && root.svc.volume >= 0 ? root.svc.volume : 0
         onMoved: function(v) { if (root.svc) root.svc.setVolume(v) }
       }
@@ -163,20 +168,20 @@ Column {
         iconText: root.svc && root.svc.sleepMinutesLeft > 0 ? "\u{F04B2}" : "\u{F04B2}"
         foreground: root.svc && root.svc.sleepMinutesLeft > 0 ? Color.accent : Color.foreground
         tooltipText: root.svc && root.svc.sleepMinutesLeft > 0
-          ? "Sleep in " + root.svc.sleepMinutesLeft + " min (click to change)"
-          : "Sleep timer: 15 / 30 / 60 min"
+          ? root.svc.trn("transport.sleepIn", root.svc.sleepMinutesLeft, "Sleep in %1 min (click to change)").arg(I18n.formatNumber(root.svc.sleepMinutesLeft))
+          : root.tr("transport.sleepTimer", "Sleep timer: 15 / 30 / 60 min")
         fontFamily: root.family
         onClicked: if (root.svc) root.svc.cycleSleep()
       }
       PanelActionButton {
         iconText: "\u{F03CC}"
-        tooltipText: "Show the YouTube Music window"
+        tooltipText: root.tr("transport.show", "Show the YouTube Music window")
         fontFamily: root.family
         onClicked: if (root.svc) root.svc.revealApp()
       }
       PanelActionButton {
         iconText: "\u{F0425}"
-        tooltipText: "Close YouTube Music (frees its memory; you stay signed in)"
+        tooltipText: root.tr("transport.quit", "Close YouTube Music (frees its memory; you stay signed in)")
         fontFamily: root.family
         enabled: root.svc && root.svc.ready
         onClicked: if (root.svc) root.svc.quitApp()

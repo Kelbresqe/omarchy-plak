@@ -67,12 +67,13 @@ Item {
     root.rows = []
     root.cursor = 0
   }
+  function tr(key, fallback) { return root.svc ? root.svc.tr(key, fallback) : fallback }
 
   Text {
     anchors.centerIn: parent
     visible: !root.openList && root.library.length === 0
     textFormat: Text.PlainText
-    text: root.svc && root.svc.libraryLoading ? "Loading your library…" : "No playlists yet"
+    text: root.svc && root.svc.libraryLoading ? root.tr("playlists.loading", "Loading your library…") : root.tr("playlists.empty", "No playlists yet")
     color: Color.foreground; opacity: 0.5
     font.family: root.family; font.pixelSize: Style.font.body
   }
@@ -173,7 +174,7 @@ Item {
       spacing: Style.space(8)
       PanelActionButton {
         iconText: "\u{F004D}"
-        tooltipText: "Back (←)"
+        tooltipText: root.tr("playlists.back", "Back (←)")
         fontFamily: root.family
         onClicked: root.back()
       }
@@ -187,14 +188,14 @@ Item {
         elide: Text.ElideRight
       }
       Button {
-        text: "Play"
+        text: root.tr("playlists.play", "Play")
         iconText: "\u{F040A}"
         fontFamily: root.family
         bordered: true
         onClicked: root.svc.play(root.openPlaylistId || root.openList.id, "", false)
       }
       Button {
-        text: "Shuffle"
+        text: root.tr("playlists.shuffle", "Shuffle")
         iconText: "\u{F049D}"
         fontFamily: root.family
         bordered: true
@@ -205,7 +206,7 @@ Item {
     Text {
       visible: root.loading
       textFormat: Text.PlainText
-      text: "Loading…"
+      text: root.tr("common.loading", "Loading…")
       color: Color.foreground; opacity: 0.5
       font.family: root.family; font.pixelSize: Style.font.bodySmall
     }

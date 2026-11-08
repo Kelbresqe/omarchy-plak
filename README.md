@@ -117,8 +117,8 @@ in: **Open YouTube Music** brings it back.
 |---|---|
 | `Tab` / `Shift+Tab` | cycle views |
 | `h` `n` `p` `q` `y` `/` | Home · Now playing · Playlists · Queue · Lyrics · Search |
-| `↑ ↓ ← →` or `j k h l` | move; `←` backs out of a playlist |
-| `Enter` / `Space` | play the selected item (Space = play/pause in Now playing) |
+| `↑ ↓ ← →` or `j k h l` | move; `←` backs out of a playlist; in Now playing, `←` `→` seek 10 s |
+| `Enter` / `Space` | play the selected item (Space = play/pause in Now playing; with nothing playing, it resumes the last session) |
 | `,` `.` | previous / next track |
 | `f` `d` `r` | like · dislike · start radio from the current song |
 | `t` | repeat: off → all → this song → off |
@@ -163,6 +163,32 @@ and `ytm-bridge` exits once it sees that its own code (`bin/ytm-bridge` or
 `bin/page.js`) has changed, so the shell starts a fresh bridge within a
 couple of seconds. A bridge whose socket a newer one has taken over exits
 too.
+
+### Picking up where you left off
+
+YouTube Music forgets repeat and shuffle, and stops playing, whenever its
+browser restarts (after a reboot, **Sign in with Google**, or the ⏻ button).
+The bridge keeps a small record in
+`$XDG_STATE_HOME/tiertek.ytm/session.json` (mode 0600): the last track, the
+list it came from, how far in, the repeat / shuffle settings and the volume.
+
+- While nothing plays, Home and Now playing offer **Resume where you left
+  off**: same track, same list, same second. In Now playing, `Enter` /
+  `Space` does it too.
+- When playback starts in a new browser session, repeat and shuffle are put
+  back. A value you already changed in that session is left alone.
+- Right after the shell starts, the panel shows the last known volume /
+  repeat / shuffle at once (disabled until YouTube Music answers), instead
+  of leaving the controls blank.
+
+Delete the file to forget all of it.
+
+### Language
+
+The panel follows Omarchy's language (Setup > Language) live, from flat
+catalogs in `i18n/` (`en.json`, `tr.json`). A string missing from a catalog
+falls back to English. Adding a language means adding one file with the same
+keys; `tests/test-i18n.py` checks the keys and placeholders.
 
 ## Settings
 

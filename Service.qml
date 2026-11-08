@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Hyprland
 import Quickshell.Services.Mpris
+import qs.Commons as Commons
 import "Bridge.js" as Bridge
 import "Ytm.js" as Ytm
 
@@ -75,11 +76,31 @@ Item {
       root.loadVolume()
       root.loadRepeat()
       root.loadShuffle()
+      root.loadResume()
       root.onTrack(root.video)
     }
-    if (root.app !== "ready") { root.volume = -1; root.repeatMode = ""; root.shuffleState = -1 }
+    // Volume / repeat / shuffle keep their last known values while the page
+    // is away (the controls show them, disabled), instead of vanishing.
     if (root.video !== wasVideo) root.onTrack(root.video)
   }
+
+  // Settings the bridge remembered from the last session ({volume, repeat,
+  // shuffle}), applied only where nothing better is known yet, so the panel
+  // shows its controls right after the shell (re)starts.
+  function applyMemo(memo) {
+    if (!memo) return
+    if (root.volume < 0 && typeof memo.volume === "number") root.volume = Math.max(0, Math.min(1, memo.volume / 100))
+    if (root.repeatMode === "" && (memo.repeat === "NONE" || memo.repeat === "ALL" || memo.repeat === "ONE")) root.repeatMode = memo.repeat
+    if (root.shuffleState < 0 && typeof memo.shuffle === "boolean") root.shuffleState = memo.shuffle ? 1 : 0
+  }
+
+  // ---------------------------------------------------------------- strings
+
+  // The plugin's own strings (i18n/<language>.json), following
+  // Setup > Language live; English is the fallback for anything missing.
+  Commons.Translations { id: strings; directory: Qt.resolvedUrl("i18n") }
+  function tr(key, fallback) { return strings.t(key, fallback) }
+  function trn(key, count, fallback) { return strings.tn(key, count, fallback) }
 
   function currentState() {
     return { link: root.link, app: root.app, pid: root.pid, video: root.video }
@@ -125,12 +146,20 @@ Item {
   function next() { if (player && player.canGoNext) player.next() }
   function previous() { if (player && player.canGoPrevious) player.previous() }
   function seekTo(seconds) { if (player && player.canSeek) player.position = seconds }
+  // ← / → in Now playing.
+  function seekBy(delta) {
+    if (!player || !player.canSeek) return
+    var end = player.lengthSupported && player.length > 0 ? player.length - 1 : Infinity
+    player.position = Math.max(0, Math.min(end, player.position + delta))
+  }
 
   // Volume, 0–1. Chromium's MPRIS player advertises Volume and accepts a
   // write, but ignores it and always reads back 1.0 — so volume goes through
-  // the page's own slider via the bridge instead. -1 until the page answers.
+  // the page's own slider via the bridge instead. -1 while unknown.
+  // *Known drives whether a control is shown, *Supported whether it acts.
   property real volume: -1
-  readonly property bool volumeSupported: root.ready && root.volume >= 0
+  readonly property bool volumeKnown: root.volume >= 0
+  readonly property bool volumeSupported: root.ready && root.volumeKnown
 
   function loadVolume() {
     root.request("volume.get", null, function(m) {
@@ -153,7 +182,8 @@ Item {
   // Repeat: NONE / ALL / ONE, read from and set through the page's player bar
   // (Chromium's MPRIS player has no LoopStatus). "" until the page answers.
   property string repeatMode: ""
-  readonly property bool repeatSupported: root.ready && root.repeatMode !== ""
+  readonly property bool repeatKnown: root.repeatMode !== ""
+  readonly property bool repeatSupported: root.ready && root.repeatKnown
 
   function loadRepeat() {
     root.request("repeat.get", null, function(m) {
@@ -174,7 +204,8 @@ Item {
   // Shuffle: a toggle on the page's player bar (Chromium's MPRIS player has
   // no Shuffle). -1 unknown, 0 off, 1 on.
   property int shuffleState: -1
-  readonly property bool shuffleSupported: root.ready && root.shuffleState >= 0
+  readonly property bool shuffleKnown: root.shuffleState >= 0
+  readonly property bool shuffleSupported: root.ready && root.shuffleKnown
   readonly property bool shuffleOn: root.shuffleState === 1
 
   function applyShuffle(m) {
@@ -192,8 +223,23 @@ Item {
     })
   }
 
+  // The track the last session ended on, offered while nothing plays:
+  // {video, list, time, title, artist}, or null.
+  property var resume: null
+  function loadResume() {
+    root.request("resume.get", null, function(m) { root.resume = m.ok && m.resume && !root.video ? m.resume : null })
+  }
+  function resumePlay() {
+    if (!root.resume || !root.ready) return
+    root.resume = null
+    root.request("resume.play", null, null)
+  }
+
   // Pick up a change made in the YouTube Music window itself.
-  onPanelOpenChanged: if (root.panelOpen && root.ready) { root.loadVolume(); root.loadRepeat(); root.loadShuffle() }
+  onPanelOpenChanged: if (root.panelOpen && root.ready) {
+    root.loadVolume(); root.loadRepeat(); root.loadShuffle()
+    if (!root.video) root.loadResume()
+  }
 
   // ---------------------------------------------------------------- bridge process
 
@@ -233,7 +279,7 @@ Item {
     onConnectionStateChanged: {
       root.applyState(Bridge.reduce(root.currentState(), { socket: sock.connected ? "connected" : "disconnected" }))
       if (sock.connected) {
-        root.request("state", null, null)
+        root.request("state", null, function(m) { if (m.ok) root.applyMemo(m.memo) })
       } else {
         var dropped = Bridge.expire(root.client, 0)
         for (var i = 0; i < dropped.length; i++) if (dropped[i].cb) dropped[i].cb({ ok: false, error: "bridge-down" })
@@ -271,6 +317,8 @@ Item {
     var d = Bridge.decode(root.client, line)
     if (d.kind === "junk") return
     root.applyState(Bridge.reduce(root.currentState(), { msg: d.msg }))
+    // The bridge restored repeat / shuffle from the last session.
+    if (d.kind === "event" && d.msg.ev === "player") { root.loadRepeat(); root.loadShuffle() }
     if (d.kind === "response") {
       if (d.msg.ok === false && d.msg.error === "page-error") root.lastError = d.op
       if (d.cb) d.cb(d.msg)
@@ -348,6 +396,8 @@ Item {
     root.liked = ""
     root.lyrics = null
     root.lyricsVideo = ""
+    if (videoId) root.resume = null
+    else if (root.ready) root.loadResume()
     if (!videoId || !root.ready) return
     queueRefresh.restart()
     root.refreshLiked()
