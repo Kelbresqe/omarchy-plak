@@ -254,7 +254,7 @@ that fixes it:
 | panel says | meaning |
 |---|---|
 | *Starting the bridge…* | the shell is starting `ytm-bridge`; give it a second. If it stays, `journalctl --user -f` shows `[io.github.kelbresqe.plak]` lines. |
-| *YouTube Music is not open* | no app window. Click **Open YouTube Music**. |
+| *YouTube Music is not open* | no app window. Click **Open YouTube Music**. If the window closed on its own, `journalctl --user -t ytm-cdp` shows why. |
 | *Connecting to YouTube Music…* | the window exists, the page is still loading. |
 | *Not signed in to YouTube Music* | signed out. Click **Sign in with Google** (see **First run**). |
 | *Sign in in the Google window, then close it…* | the plain sign-in window is open. Once you close it, Plak reopens. |

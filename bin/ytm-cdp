@@ -33,16 +33,33 @@ import os
 import socket
 import subprocess
 import sys
+import syslog
 import threading
+import traceback
 
 PIPE_FLAG = "--remote-debugging-pipe"
 # The largest real message measured is ~1.4 MB (`home`); see the bridge.
 MAX_MESSAGE = 16 * 1024 * 1024
 
 
-def log(*parts):
-    sys.stderr.write("ytm-cdp: " + " ".join(str(p) for p in parts) + "\n")
+# The launcher sends this process's output to /dev/null (it is the browser's
+# too, and noisy), so problems go to the journal as well: journalctl -t ytm-cdp
+syslog.openlog("ytm-cdp")
+
+
+def log(*parts, prio=syslog.LOG_WARNING):
+    line = " ".join(str(p) for p in parts)
+    sys.stderr.write("ytm-cdp: " + line + "\n")
     sys.stderr.flush()
+    syslog.syslog(prio, line)
+
+
+def report(exc_type, exc, tb):
+    log("".join(traceback.format_exception(exc_type, exc, tb)).rstrip(), prio=syslog.LOG_ERR)
+
+
+sys.excepthook = report
+threading.excepthook = lambda a: report(a.exc_type, a.exc_value, a.exc_traceback)
 
 
 class Splitter:
@@ -78,7 +95,9 @@ class Splitter:
 
 
 def dumps(msg):
-    return json.dumps(msg, separators=(",", ":"), ensure_ascii=False).encode()
+    # ASCII escapes, because page data can hold a lone UTF-16 surrogate (a
+    # cut emoji) that json.loads accepts but UTF-8 cannot encode.
+    return json.dumps(msg, separators=(",", ":")).encode()
 
 
 class Relay:
@@ -108,7 +127,10 @@ class Relay:
             if not data:
                 return
             for raw in split.feed(data):
-                self._route(raw)
+                try:
+                    self._route(raw)
+                except Exception as e:    # one bad message must not deafen the relay
+                    log("message dropped:", repr(e))
             if split.dropped:
                 log("dropped", split.dropped, "oversized message(s) from the browser")
                 split.dropped = 0
@@ -270,6 +292,7 @@ def main():
     threading.Thread(target=relay.accept_loop, args=(srv,), daemon=True).start()
     threading.Thread(target=relay.pump_browser, args=(out_r,), daemon=True).start()
     rc = proc.wait()
+    log("browser exited with code", rc, prio=syslog.LOG_INFO)
     try:
         if os.stat(path).st_ino == inode:
             os.unlink(path)

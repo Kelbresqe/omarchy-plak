@@ -43,6 +43,9 @@ while True:
             for i in slow:
                 send({"id": i, "result": {"late": True}})
             slow = []
+        if method == "Test.surrogate":
+            send({"id": m["id"], "result": {"title": "cut \ud83d emoji"}})
+            continue
         if method == "Test.exit":
             sys.exit(0)
         if method == "Target.attachToTarget":

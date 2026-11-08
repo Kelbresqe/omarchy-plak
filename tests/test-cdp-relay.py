@@ -112,6 +112,15 @@ class RelayTest(unittest.TestCase):
         b.send(2, "Ping")
         self.assertEqual(b.reply(2)["result"], {"echo": "Ping"})
 
+    def test_lone_surrogate_passes_through(self):
+        # Page data can carry half an emoji; the relay must pass it on and
+        # keep relaying afterwards.
+        c = Conn(self.path)
+        c.send(1, "Test.surrogate")
+        self.assertEqual(c.reply(1)["result"], {"title": "cut \ud83d emoji"})
+        c.send(2, "Ping")
+        self.assertEqual(c.reply(2)["result"], {"echo": "Ping"})
+
     def test_malformed_command_drops_the_client(self):
         a = Conn(self.path)
         a.sock.sendall(b'{"method":"x"}\0')     # no id
