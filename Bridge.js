@@ -73,7 +73,7 @@ function describe(app, link) {
   // Google refuses to sign in the remote-controlled app window, so signing in
   // goes through a plain browser window (bridge op app.signin).
   if (app === "signed-out") return { key: "state.signedOut", text: "Not signed in to YouTube Music", action: "signin" }
-  if (app === "signing-in") return { key: "state.signingIn", text: "Sign in in the Google window, then close it. TekTube reopens by itself.", action: "" }
+  if (app === "signing-in") return { key: "state.signingIn", text: "Sign in in the Google window, then close it. Plak reopens by itself.", action: "" }
   return { key: "", text: "", action: "" }
 }
 

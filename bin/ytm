@@ -10,10 +10,10 @@ set -euo pipefail
 verb="${1:-toggle}"
 case "$verb" in
   toggle|open|close|playPause|next|prev|like|reveal|hide|launch|quit|volumeUp|volumeDown|repeat|shuffle|save)
-    exec qs -p /usr/share/omarchy/shell ipc call tiertek.ytm "$verb" ;;
+    exec qs -p /usr/share/omarchy/shell ipc call io.github.kelbresqe.plak "$verb" ;;
   view)
     case "${2:-}" in
-      player|playlists|queue|history|lyrics|search) exec qs -p /usr/share/omarchy/shell ipc call tiertek.ytm view "$2" ;;
+      player|playlists|queue|history|lyrics|search) exec qs -p /usr/share/omarchy/shell ipc call io.github.kelbresqe.plak view "$2" ;;
       *) echo "ytm: unknown view: ${2:-}" >&2; exit 2 ;;
     esac ;;
   *) echo "ytm: unknown verb: $verb" >&2; exit 2 ;;

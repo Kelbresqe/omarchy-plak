@@ -268,8 +268,8 @@ REPEAT_MODES = ("NONE", "ALL", "ONE")
 
 
 class Memory:
-    """What TekTube remembers between browser sessions, in
-    $XDG_STATE_HOME/tiertek.ytm/session.json (0600): the last track, the list
+    """What Plak remembers between browser sessions, in
+    $XDG_STATE_HOME/io.github.kelbresqe.plak/session.json (0600): the last track, the list
     it came from and how far in (for Resume), and repeat / shuffle, which
     YouTube Music forgets when its browser restarts, plus the volume so the
     panel can show its controls before the page answers. Everything read
@@ -1238,10 +1238,10 @@ class Server:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--socket", default=os.path.join(xdg("XDG_RUNTIME_DIR", "/tmp"), "tiertek.ytm.sock"))
-    ap.add_argument("--profile", default=os.path.join(xdg("XDG_DATA_HOME", "~/.local/share"), "tiertek.ytm", "profile"))
-    ap.add_argument("--cache", default=os.path.join(xdg("XDG_CACHE_HOME", "~/.cache"), "tiertek.ytm"))
-    ap.add_argument("--state-file", default=os.path.join(xdg("XDG_STATE_HOME", "~/.local/state"), "tiertek.ytm", "session.json"))
+    ap.add_argument("--socket", default=os.path.join(xdg("XDG_RUNTIME_DIR", "/tmp"), "io.github.kelbresqe.plak.sock"))
+    ap.add_argument("--profile", default=os.path.join(xdg("XDG_DATA_HOME", "~/.local/share"), "io.github.kelbresqe.plak", "profile"))
+    ap.add_argument("--cache", default=os.path.join(xdg("XDG_CACHE_HOME", "~/.cache"), "io.github.kelbresqe.plak"))
+    ap.add_argument("--state-file", default=os.path.join(xdg("XDG_STATE_HOME", "~/.local/state"), "io.github.kelbresqe.plak", "session.json"))
     ap.add_argument("--launcher", default=os.path.join(HERE, "ytm-app"))
     ap.add_argument("--once", nargs="+", metavar=("OP", "JSON"))
     ap.add_argument("--check-id")

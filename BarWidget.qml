@@ -8,9 +8,9 @@ import qs.Commons
 // bar along the bottom edge. Click for the panel.
 BarWidget {
   id: root
-  moduleName: "tiertek.ytm"
+  moduleName: "io.github.kelbresqe.plak"
 
-  readonly property var svc: bar && bar.shell ? bar.shell.serviceFor("tiertek.ytm") : null
+  readonly property var svc: bar && bar.shell ? bar.shell.serviceFor("io.github.kelbresqe.plak") : null
 
   // The service owns no settings; it reads ours.
   function pushSettings() { if (root.svc) root.svc.settings = root.settings }
@@ -74,7 +74,7 @@ BarWidget {
   }
 
   IpcHandler {
-    target: "tiertek.ytm"
+    target: "io.github.kelbresqe.plak"
     function open(): void { root.open() }
     function close(): void { root.close() }
     function toggle(): void { root.toggle() }
@@ -170,7 +170,7 @@ BarWidget {
         textFormat: Text.PlainText
         text: root.hasMedia
           ? root.title + (root.artist ? "  ·  " + root.artist : "")
-          : "TekTube"
+          : "Plak"
         color: root.hasMedia ? root.fg : root.dimFg
         font.family: root.bar ? root.bar.fontFamily : Style.font.family
         font.pixelSize: Style.font.body
@@ -227,8 +227,8 @@ BarWidget {
     }
     onEntered: if (root.bar) root.bar.showTooltip(root, root.hasMedia
       ? root.title + (root.artist ? " — " + root.artist : "")
-      : (root.svc && root.svc.app === "ready" ? root.svc.tr("bar.nothingPlaying", "TekTube · nothing playing")
-         : root.svc ? root.svc.tr("bar.clickToOpen", "TekTube · click to open") : "TekTube"))
+      : (root.svc && root.svc.app === "ready" ? root.svc.tr("bar.nothingPlaying", "Plak · nothing playing")
+         : root.svc ? root.svc.tr("bar.clickToOpen", "Plak · click to open") : "Plak"))
     onExited: if (root.bar) root.bar.hideTooltip(root)
   }
 }

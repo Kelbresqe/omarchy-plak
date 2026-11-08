@@ -10,7 +10,7 @@ import "views" as Views
 // routes keys.
 Panel {
   id: root
-  moduleName: "tiertek.ytm"
+  moduleName: "io.github.kelbresqe.plak"
   manageIpc: false
 
   property var anchorItem: null

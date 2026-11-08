@@ -2,7 +2,7 @@ import QtQuick
 import qs.Ui
 import qs.Commons
 
-// The TekTube wordmark, centered, with an equalizer underline that breathes
+// The Plak wordmark, centered, with an equalizer underline that breathes
 // while playing and follows cava when it is present.
 Item {
   id: root
@@ -17,36 +17,35 @@ Item {
     id: mark
     anchors.horizontalCenter: parent.horizontalCenter
     anchors.top: parent.top
-    spacing: Style.space(4)
+    spacing: Style.space(8)
 
+    // A record in the theme's colours: disc, label, spindle hole.
+    Rectangle {
+      id: disc
+      anchors.verticalCenter: parent.verticalCenter
+      width: word.implicitHeight * 0.8
+      height: width
+      radius: width / 2
+      color: Color.accent
+      Rectangle {
+        anchors.centerIn: parent
+        width: parent.width * 0.38
+        height: width
+        radius: width / 2
+        color: Color.background
+        Rectangle { anchors.centerIn: parent; width: 3; height: 3; radius: 1.5; color: Color.accent }
+      }
+    }
     Text {
+      id: word
       anchors.verticalCenter: parent.verticalCenter
       textFormat: Text.PlainText
-      text: "Tek"
+      text: "Plak"
       color: Color.foreground
       font.family: root.family
       font.pixelSize: Style.font.display
       font.bold: true
       font.letterSpacing: 1
-    }
-    // The play-badge: YouTube's shape in the theme's colours.
-    Rectangle {
-      anchors.verticalCenter: parent.verticalCenter
-      width: tube.implicitWidth + Style.space(14)
-      height: tube.implicitHeight + Style.space(4)
-      radius: height * 0.32
-      color: Color.accent
-      Text {
-        id: tube
-        anchors.centerIn: parent
-        textFormat: Text.PlainText
-        text: "Tube"
-        color: Color.background
-        font.family: root.family
-        font.pixelSize: Style.font.display
-        font.bold: true
-        font.letterSpacing: 1
-      }
     }
   }
 

@@ -7,8 +7,8 @@ and cannot reach, and where a reviewer should look.
 
 | component | privilege | notes |
 |---|---|---|
-| `bin/ytm-app` | none | launches the user's browser with a **dedicated** `--user-data-dir` and `--remote-debugging-port=0` (random loopback port). With `--signin` it instead opens a plain window on the same profile at a fixed `https://accounts.google.com/ServiceLogin` URL, **without** the debug port, refuses if another live browser holds the profile, and records its own pid in `$XDG_RUNTIME_DIR/tiertek.ytm.sock.signin` (removed on exit). No sudo, no installer, no network. |
-| `bin/ytm-bridge` | none | Python 3 standard library. Connects to `127.0.0.1:<port>` read from the profile's `DevToolsActivePort`; listens on `$XDG_RUNTIME_DIR/tiertek.ytm.sock`, created with umask 0177 and chmod 0600. |
+| `bin/ytm-app` | none | launches the user's browser with a **dedicated** `--user-data-dir` and `--remote-debugging-port=0` (random loopback port). With `--signin` it instead opens a plain window on the same profile at a fixed `https://accounts.google.com/ServiceLogin` URL, **without** the debug port, refuses if another live browser holds the profile, and records its own pid in `$XDG_RUNTIME_DIR/io.github.kelbresqe.plak.sock.signin` (removed on exit). No sudo, no installer, no network. |
+| `bin/ytm-bridge` | none | Python 3 standard library. Connects to `127.0.0.1:<port>` read from the profile's `DevToolsActivePort`; listens on `$XDG_RUNTIME_DIR/io.github.kelbresqe.plak.sock`, created with umask 0177 and chmod 0600. |
 | `bin/page.js` | page context | the only code evaluated inside the YouTube Music page. Installed once per attach with `Runtime.evaluate`; every later call is `Runtime.callFunctionOn` with **typed arguments**, never string-built JavaScript. |
 | `Service.qml` | shell | spawns the bridge, `notify-send`, `which cava`, `cava`, and `hyprctl dispatch_lua_expression` with fixed argument arrays. |
 

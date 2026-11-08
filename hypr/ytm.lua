@@ -1,4 +1,4 @@
--- TekTube (tiertek.ytm) keybindings.
+-- Plak (io.github.kelbresqe.plak) keybindings.
 --
 -- Append this block to ~/.config/hypr/bindings.lua; Hyprland reloads it on
 -- save (check with `hyprctl configerrors`).
@@ -12,13 +12,13 @@
 -- MPRIS, and its volume keys keep changing the system volume; SUPER + CTRL +
 -- UP/DOWN change only the music (shown on Omarchy's OSD).
 
--- BEGIN tiertek.ytm
-local ytm = os.getenv("HOME") .. "/.config/omarchy/plugins/tiertek.ytm/bin/ytm"
+-- BEGIN io.github.kelbresqe.plak
+local ytm = os.getenv("HOME") .. "/.config/omarchy/plugins/io.github.kelbresqe.plak/bin/ytm"
 
-o.bind("SUPER + SHIFT + M", "TekTube panel", ytm .. " toggle")
+o.bind("SUPER + SHIFT + M", "Plak panel", ytm .. " toggle")
 o.bind("SUPER + ALT + M", "Music: play / pause", ytm .. " playPause")
 o.bind("SUPER + CTRL + M", "Music: next track", ytm .. " next")
 o.bind("SUPER + CTRL + SHIFT + M", "Music: previous track", ytm .. " prev")
 o.bind("SUPER + CTRL + UP", "Music: volume up", ytm .. " volumeUp", { repeating = true })
 o.bind("SUPER + CTRL + DOWN", "Music: volume down", ytm .. " volumeDown", { repeating = true })
--- END tiertek.ytm
+-- END io.github.kelbresqe.plak

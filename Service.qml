@@ -34,7 +34,7 @@ Item {
     return p.replace(/\/$/, "")
   }
   readonly property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR") || "/tmp"
-  readonly property string socketPath: runtimeDir + "/tiertek.ytm.sock"
+  readonly property string socketPath: runtimeDir + "/io.github.kelbresqe.plak.sock"
 
   // ---------------------------------------------------------------- state
 
@@ -325,7 +325,7 @@ Item {
       onRead: data => {
         var line = String(data)
         if (line.indexOf("listening on") !== -1) root.bridgeListening = true
-        if (line.indexOf("state ") === -1) console.log("[tiertek.ytm] " + line)
+        if (line.indexOf("state ") === -1) console.log("[io.github.kelbresqe.plak] " + line)
       }
     }
     onExited: (code, status) => {
@@ -578,8 +578,8 @@ Item {
 
   function sendToast(iconPath) {
     if (toastProc.running) return
-    var cmd = ["notify-send", "--app-name=TekTube",
-               "--hint=string:x-canonical-private-synchronous:tiertek.ytm", "--expire-time=4000"]
+    var cmd = ["notify-send", "--app-name=Plak",
+               "--hint=string:x-canonical-private-synchronous:io.github.kelbresqe.plak", "--expire-time=4000"]
     if (iconPath) cmd.push("--icon=" + iconPath)
     cmd.push(root.title, root.artist + (root.album && root.album !== root.title ? "  ·  " + root.album : ""))
     toastProc.command = cmd
@@ -815,10 +815,10 @@ Item {
   function holdNextWindow(on) {
     if (!root.setting("parkWindow", true)) return
     var lua = on
-      ? "local r = _G.__tiertek_ytm_rule; if r then r:set_enabled(true) else _G.__tiertek_ytm_rule = hl.window_rule({ "
-        + "name = [[tiertek-ytm]], match = { class = [[" + root.ruleClass + "]] }, workspace = [[special:ytm silent]], "
+      ? "local r = _G.__plak_rule; if r then r:set_enabled(true) else _G.__plak_rule = hl.window_rule({ "
+        + "name = [[plak]], match = { class = [[" + root.ruleClass + "]] }, workspace = [[special:ytm silent]], "
         + "no_initial_focus = true, no_anim = true, focus_on_activate = false, suppress_event = [[activate activatefocus]] }) end"
-      : "local r = _G.__tiertek_ytm_rule; if r then r:set_enabled(false) end"
+      : "local r = _G.__plak_rule; if r then r:set_enabled(false) end"
     Quickshell.execDetached(["hyprctl", "eval", lua])
     if (on) ruleTimeout.restart()
     else ruleTimeout.stop()

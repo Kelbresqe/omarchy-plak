@@ -16,7 +16,7 @@ Column {
   Text {
     width: parent.width
     textFormat: Text.PlainText
-    text: "TekTube"
+    text: "Plak"
     color: Color.foreground
     font.family: root.family
     font.pixelSize: Style.font.subtitle
@@ -36,7 +36,7 @@ Column {
     width: parent.width
     visible: svc && svc.app === "signed-out"
     textFormat: Text.PlainText
-    text: root.tr("signin.hint", "Opens Google's sign-in page in a normal browser window, with the address bar showing. Google blocks sign-in in TekTube's own window because the plugin remote-controls it. The window uses TekTube's own browser profile, and the plugin never sees your password or cookies.")
+    text: root.tr("signin.hint", "Opens Google's sign-in page in a normal browser window, with the address bar showing. Google blocks sign-in in Plak's own window because the plugin remote-controls it. The window uses Plak's own browser profile, and the plugin never sees your password or cookies.")
     color: Color.foreground
     opacity: 0.45
     font.family: root.family

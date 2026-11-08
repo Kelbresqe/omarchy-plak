@@ -49,14 +49,14 @@ is_family() {
   return 1
 }
 
-profile="${YTM_PROFILE_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/tiertek.ytm/profile}"
+profile="${YTM_PROFILE_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/io.github.kelbresqe.plak/profile}"
 
 # The browser that built the profile. Chrome, Brave and Chromium cannot read
 # each other's encrypted cookies, so opening the profile with another one
 # (say, after the default browser changed) silently loses the sign-in and
 # rewrites the cookie store. Stick with the recorded browser while it is
 # installed; an explicit --browser (the widget's `browser` setting) wins.
-mark="$profile/TekTube-Browser"
+mark="$profile/Plak-Browser"
 recorded=""
 if [ -f "$mark" ]; then
   recorded=$(head -c 64 "$mark" | tr -d '[:space:]')
@@ -121,7 +121,7 @@ if [ "$signin" -eq 1 ]; then
   if [ -L "$lock" ]; then
     owner=$(readlink "$lock"); owner=${owner##*-}
     if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
-      echo "ytm-app: the profile is in use by pid $owner; close TekTube's window first" >&2
+      echo "ytm-app: the profile is in use by pid $owner; close Plak's window first" >&2
       exit 4
     fi
   fi

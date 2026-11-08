@@ -56,7 +56,7 @@ echo "$out" | grep -q 9222 && bad "fixed port present" || ok
 
 # 7. the browser recorded in the profile wins over a changed default
 reset; stub brave; stub chromium; xdg brave.desktop
-mkdir -p "$YTM_PROFILE_DIR"; printf 'chromium\n' > "$YTM_PROFILE_DIR/TekTube-Browser"
+mkdir -p "$YTM_PROFILE_DIR"; printf 'chromium\n' > "$YTM_PROFILE_DIR/Plak-Browser"
 out=$(run); [ "$(echo "$out" | head -1)" = "$fake/chromium" ] && ok || bad "recorded browser: got $(echo "$out" | head -1)"
 # 8. ...unless it is no longer installed
 reset; stub brave; xdg brave.desktop
@@ -66,11 +66,11 @@ reset; stub brave; stub chromium; xdg chromium.desktop
 out=$(run --browser brave); [ "$(echo "$out" | head -1)" = "$fake/brave" ] && ok || bad "explicit over record: got $(echo "$out" | head -1)"
 # 10. a hostile record is ignored
 reset; stub brave; stub chromium; xdg brave.desktop
-printf 'chromium; touch /tmp/x\n' > "$YTM_PROFILE_DIR/TekTube-Browser"
+printf 'chromium; touch /tmp/x\n' > "$YTM_PROFILE_DIR/Plak-Browser"
 out=$(run); [ "$(echo "$out" | head -1)" = "$fake/brave" ] && ok || bad "hostile record: got $(echo "$out" | head -1)"
 # --print never writes the record
-[ "$(cat "$YTM_PROFILE_DIR/TekTube-Browser")" = "chromium; touch /tmp/x" ] && ok || bad "--print rewrote the record"
-rm -f "$YTM_PROFILE_DIR/TekTube-Browser"
+[ "$(cat "$YTM_PROFILE_DIR/Plak-Browser")" = "chromium; touch /tmp/x" ] && ok || bad "--print rewrote the record"
+rm -f "$YTM_PROFILE_DIR/Plak-Browser"
 
 # 6. --signin: same profile, Google's sign-in page, and no debug port
 reset; stub chromium; xdg chromium.desktop
