@@ -27,6 +27,7 @@
       "autoRelaunch": false,
       "parkWindow": true,
       "visualizer": true,
+      "pauseForOtherAudio": true,
       "maxLabelWidth": 180
     },
     "schema": [
@@ -36,6 +37,7 @@
       { "key": "autoRelaunch", "type": "bool", "label": "Reopen YouTube Music automatically if its window is closed", "defaultValue": false },
       { "key": "parkWindow", "type": "bool", "label": "Keep the YouTube Music window in a hidden special workspace", "defaultValue": true },
       { "key": "visualizer", "type": "bool", "label": "Spectrum bars (needs cava)", "defaultValue": true },
+      { "key": "pauseForOtherAudio", "type": "bool", "label": "Pause when another player starts, resume when it stops", "defaultValue": true, "description": "Another media player (a video in your browser, mpv, Spotify…) starting pauses the music; once every other player has been quiet for a few seconds it resumes, unless you paused or played it yourself in between." },
       { "key": "maxLabelWidth", "type": "number", "label": "Bar label width (px)", "defaultValue": 180 }
     ]
   }

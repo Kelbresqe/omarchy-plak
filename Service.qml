@@ -142,6 +142,70 @@ Item {
     onTriggered: if (root.player) root.player.positionChanged()
   }
 
+  // ---------------------------------------------------------------- other audio
+
+  // When another MPRIS player starts (a video in the everyday browser, mpv,
+  // Spotify…), pause; once every other player has been quiet for a moment,
+  // resume, but only if the pause was ours and nothing was played by hand in
+  // between. The pause idea is from Dqckey's omarchy-ytmusic-player; the
+  // resume-after-quiet idea is from crsstha's ytm-bar (both MIT).
+  // Our own player is told apart by its browser pid, like pickPlayer();
+  // with that pid unknown nothing counts as "other". playerctld-style
+  // proxies would mirror our own player, so they are skipped.
+  readonly property bool otherPlaying: {
+    if (!root.pid) return false
+    var mine = ".instance" + root.pid
+    for (var i = 0; i < players.length; i++) {
+      var p = players[i]
+      if (!p || p === root.player) continue
+      var name = String(p.dbusName || "")
+      if (name.slice(-mine.length) === mine || name.indexOf("playerctld") !== -1) continue
+      if (p.isPlaying) return true
+    }
+    return false
+  }
+  property bool pausedForOther: false
+  // Only a change seen while our own player is known counts. When it
+  // becomes known (shell start, a new browser) the other players' state at
+  // that moment is the baseline: a video already playing then is not a
+  // video that just started. Without this every shell restart during a
+  // video paused the music.
+  property bool otherBaseline: false
+  property bool otherWatching: false
+  onPlayerChanged: {
+    root.otherWatching = false
+    Qt.callLater(function() {
+      root.otherBaseline = root.otherPlaying
+      root.otherWatching = root.player !== null
+    })
+  }
+  onOtherPlayingChanged: {
+    if (!root.otherWatching || root.otherPlaying === root.otherBaseline) return
+    root.otherBaseline = root.otherPlaying
+    if (!root.setting("pauseForOtherAudio", true)) return
+    if (root.otherPlaying) {
+      resumeAfterOther.stop()
+      if (root.isPlaying && root.player) { root.pausedForOther = true; root.player.pause() }
+    } else if (root.pausedForOther) {
+      resumeAfterOther.restart()
+    }
+  }
+  // Played by hand while the other player goes on: leave it playing, and
+  // don't resume on our own later either.
+  onIsPlayingChanged: if (root.isPlaying && root.pausedForOther) { root.pausedForOther = false; resumeAfterOther.stop() }
+  // A quiet moment first, so an ad break or buffering in the other player
+  // doesn't flip the music on and off.
+  Timer {
+    id: resumeAfterOther
+    interval: 2500
+    repeat: false
+    onTriggered: {
+      if (!root.pausedForOther || root.otherPlaying) return
+      root.pausedForOther = false
+      if (root.player && !root.player.isPlaying) root.player.play()
+    }
+  }
+
   function togglePlaying() { if (player) player.togglePlaying() }
   function next() { if (player && player.canGoNext) player.next() }
   function previous() { if (player && player.canGoPrevious) player.previous() }

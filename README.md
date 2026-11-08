@@ -60,6 +60,10 @@ YouTube changes its stream formats: playback is the real player.
 - **Save to playlist** — any song, or the one playing, into one of your
   playlists; the ones that already have it are checked.
 - **History** — what you played, under YouTube Music's own day headings.
+- **Steps aside for other audio** — a video starting in your browser (or mpv,
+  Spotify, any MPRIS player) pauses the music; when it stops, the music picks
+  up again after a short quiet moment, unless you paused or played it
+  yourself in between. Setting: *Pause when another player starts*.
 - **Lyrics** — timed, highlighted line by line, click a line to seek; plain
   lyrics when the song has no timings.
 - **Search** — songs, albums and playlists; Enter plays.
@@ -306,7 +310,10 @@ licensed:
   browser.
 - [YouTube Music Player](https://github.com/Dqckey/omarchy-ytmusic-player)
   by Dqckey: the save-to-playlist picker
-  (`playlist/get_add_to_playlist`, `DEDUPE_OPTION_SKIP`).
+  (`playlist/get_add_to_playlist`, `DEDUPE_OPTION_SKIP`) and pausing when
+  another player starts.
+- [ytm-bar](https://github.com/crsstha/ytm-bar) by crsstha: resuming once
+  the other audio has been quiet for a moment.
 
 ## License
 
