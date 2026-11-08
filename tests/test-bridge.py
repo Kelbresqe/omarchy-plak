@@ -66,6 +66,7 @@ class Base(unittest.TestCase):
     launcher = "/bin/true"
 
     memory = None          # dict to pre-seed session.json with, before the bridge starts
+    extra_env = {}         # per-class additions to the bridge's environment
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -79,6 +80,7 @@ class Base(unittest.TestCase):
                 json.dump(self.memory, f)
         self.browser = FakeBrowser(self.profile)
         env = dict(os.environ, YTM_POLL_MS="100", YTM_CLOSE_WAIT_S="0.5", XDG_STATE_HOME=os.path.join(self.tmp, "xdg-state"))
+        env.update(self.extra_env)
         self.proc = subprocess.Popen([sys.executable, BRIDGE, "--socket", self.sockpath, "--profile", self.profile,
                                       "--launcher", self.launcher, "--cache", os.path.join(self.tmp, "cache"),
                                       "--state-file", self.state_file], env=env, stderr=subprocess.PIPE)
@@ -95,6 +97,8 @@ class Base(unittest.TestCase):
             self.proc.wait(3)
         except subprocess.TimeoutExpired:
             self.proc.kill()
+            self.proc.wait(3)
+        self.proc.stderr.close()
         self.browser.close()
 
     def wait_state(self, c, want, timeout=5):
@@ -216,9 +220,8 @@ class BridgeTest(Base):
         self.wait_state(c, "no-app")
 
 
-class SigninTest(Base):
-    """app.signin closes the app over DevTools, then hands over to
-    `ytm-app --signin --marker <socket>.signin`."""
+class RecorderBase(Base):
+    """A bridge whose launcher records the arguments it was run with."""
 
     def setUp(self):
         self.rec_dir = tempfile.mkdtemp()
@@ -237,6 +240,11 @@ class SigninTest(Base):
                     return f.read().split("\n")[:-1]
             time.sleep(0.05)
         return None
+
+
+class SigninTest(RecorderBase):
+    """app.signin closes the app over DevTools, then hands over to
+    `ytm-app --signin --marker <socket>.signin`."""
 
     def test_signin_closes_app_and_hands_over(self):
         c = Client(self.sockpath)
@@ -519,6 +527,53 @@ class WebSocketLimitTest(unittest.TestCase):
         ws = bridge.WebSocket(srv.url())
         self.assertEqual(ws.recv_text(), body.decode())
         ws.close()
+
+
+class RecoveryTest(RecorderBase):
+    """A crashed or stuck page is reloaded; still stuck after that, the
+    browser is restarted through the launcher."""
+    extra_env = {"YTM_LOGIN_POLL_S": "0.1", "YTM_FAIL_LIMIT": "2", "YTM_LIVENESS_TIMEOUT_S": "1"}
+
+    def wait_for(self, pred, timeout=5):
+        end = time.time() + timeout
+        while time.time() < end and not pred():
+            time.sleep(0.05)
+        return pred()
+
+    def test_crash_reloads_the_page(self):
+        c = Client(self.sockpath)
+        self.browser.write_port_file()
+        self.wait_state(c, "ready")
+        self.browser._send({"method": "Target.targetCrashed", "params": {"targetId": "T1", "status": "crashed", "errorCode": 139}})
+        self.assertTrue(self.wait_for(lambda: "Page.reload" in self.browser.methods))
+
+    def test_other_targets_crashing_is_ignored(self):
+        c = Client(self.sockpath)
+        self.browser.write_port_file()
+        self.wait_state(c, "ready")
+        self.browser._send({"method": "Target.targetCrashed", "params": {"targetId": "T9", "status": "crashed"}})
+        time.sleep(0.5)
+        self.assertNotIn("Page.reload", self.browser.methods)
+
+    def test_stuck_page_is_reloaded_then_the_browser_restarted(self):
+        c = Client(self.sockpath)
+        self.browser.write_port_file()
+        self.wait_state(c, "ready")
+        self.browser.canned["state"] = RuntimeError("page is stuck")
+        self.assertTrue(self.wait_for(lambda: "Page.reload" in self.browser.methods))
+        self.assertTrue(self.wait_for(lambda: os.path.exists(self.rec)), "launcher never ran")
+        self.assertIn("Browser.close", self.browser.methods)
+
+    def test_a_page_that_answers_again_is_left_alone(self):
+        c = Client(self.sockpath)
+        self.browser.write_port_file()
+        self.wait_state(c, "ready")
+        self.browser.canned["state"] = RuntimeError("blip")
+        time.sleep(0.15)                                  # one miss, under the limit
+        self.browser.canned["state"] = {"loggedIn": True}
+        self.wait_state(c, "ready")                       # polling continues in "attaching"
+        time.sleep(0.5)
+        self.assertNotIn("Page.reload", self.browser.methods)
 
 
 VID = "dQw4w9WgXcQ"

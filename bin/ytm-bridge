@@ -55,6 +55,15 @@ CLOSE_WAIT_S = float(os.environ.get("YTM_CLOSE_WAIT_S", "10"))
 # taken over (see watch_self).
 SELF_CHECK_S = float(os.environ.get("YTM_SELF_CHECK_S", "2"))
 CODE_FILES = (os.path.abspath(__file__), os.path.join(HERE, "page.js"))
+# Liveness: how often an idle, attached page is asked for its state, how
+# long it gets to answer, and how many misses in a row count as stuck. A
+# stuck page is reloaded; if it is still stuck after the reload, the
+# browser is restarted, at most RELAUNCH_MAX times per RELAUNCH_WINDOW_S.
+LOGIN_POLL_S = float(os.environ.get("YTM_LOGIN_POLL_S", "2"))
+LIVENESS_TIMEOUT_S = float(os.environ.get("YTM_LIVENESS_TIMEOUT_S", "5"))
+FAIL_LIMIT = int(os.environ.get("YTM_FAIL_LIMIT", "5"))
+RELAUNCH_MAX = 3
+RELAUNCH_WINDOW_S = 600
 
 
 def log(*parts):
@@ -347,12 +356,17 @@ class Attacher:
     browser does. State is one of no-app / signing-in / attaching /
     signed-out / ready."""
 
-    def __init__(self, profile, on_state, on_track=None, signin_marker=None, memory=None, on_player=None):
+    def __init__(self, profile, on_state, on_track=None, signin_marker=None, memory=None, on_player=None,
+                 relaunch=None):
         self.profile = profile
         self.signin_marker = signin_marker
         self.memory = memory
         self.on_player = on_player or (lambda: None)
+        self.relaunch = relaunch       # starts the app window again (ytm-app), or None
         self.restore_pending = False   # set on each attach, cleared once settings are restored
+        self._fails = 0                # liveness misses in a row
+        self._reloaded_at = 0.0        # when we last reloaded a stuck page; 0 = not since it answered
+        self._relaunches = []          # times of browser restarts, for the crash-loop guard
         self.on_state = on_state
         self.on_track = on_track or (lambda v: None)
         self.state = "no-app"
@@ -509,11 +523,14 @@ class Attacher:
 
     def _refresh_login(self):
         try:
-            st = self.page_call("state", {})
+            st = self.page_call("state", {}, timeout=LIVENESS_TIMEOUT_S)
         except (CdpError, PageError) as e:
             log("login check failed", e)
             self._set("attaching")
+            self._note_failure(str(e))
             return
+        self._fails = 0
+        self._reloaded_at = 0.0
         self._set("ready" if st and st.get("loggedIn") else "signed-out")
         self._note_video(st)
         self._remember(st)
@@ -548,6 +565,62 @@ class Attacher:
                 self.on_player()
         self.memory.note(self.video, info)
 
+    # ------------------------------------------------------------ recovery
+    # The renderer can crash ("Aw, Snap") or hang, and nothing used to bring
+    # it back: the state sat at "attaching" until the browser was restarted
+    # by hand. Solfa (SirAllap/omarchy-solfa) recovers the same way: reload,
+    # then restart the engine, with a crash-loop guard.
+
+    def _note_failure(self, why):
+        self._fails += 1
+        if self._fails < FAIL_LIMIT:
+            return
+        self._fails = 0
+        if not self._reloaded_at:
+            self._reload_page("not answering (%s)" % why)
+        else:
+            self._restart_browser("still not answering after a reload")
+
+    def _reload_page(self, why):
+        with self.lock:
+            cdp, session = self.cdp, self.session
+        log("page", why + "; reloading it")
+        self._reloaded_at = time.time()
+        if not cdp or not session:
+            return
+        try:
+            cdp.call("Page.reload", {}, session=session, timeout=5)
+        except CdpError as e:
+            log("reload failed", e)
+            self._restart_browser("reload failed")
+
+    def _restart_browser(self, why):
+        now = time.time()
+        self._relaunches = [t for t in self._relaunches if now - t < RELAUNCH_WINDOW_S]
+        if not self.relaunch or len(self._relaunches) >= RELAUNCH_MAX:
+            log("browser", why + "; not restarting it (%d restarts in %d s)" % (len(self._relaunches), RELAUNCH_WINDOW_S))
+            return
+        self._relaunches.append(now)
+        self._reloaded_at = 0.0
+        log("browser", why + "; restarting it")
+
+        def run():
+            if not self.close_browser(CLOSE_WAIT_S):
+                # Hung for good: our own browser (its own profile), so end it.
+                pid = self.browser_pid()
+                for sig in (signal.SIGTERM, signal.SIGKILL):
+                    try:
+                        os.kill(pid, sig)
+                    except (OSError, TypeError):
+                        break
+                    deadline = time.time() + 5
+                    while time.time() < deadline and self.browser_alive():
+                        time.sleep(0.2)
+                    if not self.browser_alive():
+                        break
+            self.relaunch()
+        threading.Thread(target=run, daemon=True).start()
+
     def _note_video(self, st):
         v = str((st or {}).get("video") or "")
         if v and not VALID_ID.match(v):
@@ -561,13 +634,18 @@ class Attacher:
         last_login = time.time()
         while not self._stop.is_set() and cdp is self.cdp and not cdp.closed.is_set():
             try:
-                ev = cdp.events.get(timeout=1.0)
+                ev = cdp.events.get(timeout=min(1.0, LOGIN_POLL_S))
             except queue.Empty:
                 # While signed out, re-check now and then: the user is typing
                 # a password in that window and nothing else tells us. While
                 # ready, the same call is how track changes are noticed —
-                # MPRIS carries no video id.
-                if self.state in ("signed-out", "ready") and time.time() - last_login > 2:
+                # MPRIS carries no video id. While attaching with a page, it
+                # is the liveness check: a page that stops answering is
+                # reloaded, then the browser restarted (see recovery above).
+                # (It used to stop polling in "attaching", so one failed
+                # check left the state there for good.)
+                polled = self.state in ("signed-out", "ready") or (self.state == "attaching" and self.session)
+                if polled and time.time() - last_login > LOGIN_POLL_S:
                     self._refresh_login()
                     last_login = time.time()
                 continue
@@ -575,6 +653,10 @@ class Attacher:
             p = ev.get("params", {}) or {}
             if m == "__closed":
                 return
+            if m == "Target.targetCrashed" and p.get("targetId") == self.target:
+                self._set("attaching")
+                self._reload_page("renderer crashed (%s)" % p.get("status", "?"))
+                continue
             if m == "Page.javascriptDialogOpening" and ev.get("sessionId") == self.session \
                     and p.get("type") == "beforeunload":
                 # The site's "Leave site?" prompt, raised when a play has to
@@ -1161,8 +1243,17 @@ def main():
         if s:
             s.broadcast({"ev": "player"})
 
+    def relaunch():
+        # Same launcher as app.launch; it reopens the browser the profile
+        # was built with.
+        try:
+            subprocess.Popen([args.launcher], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError as e:
+            log("relaunch failed", e)
+
     att = Attacher(args.profile, on_state, on_track, signin_marker=args.socket + ".signin",
-                   memory=Memory(args.state_file), on_player=on_player)
+                   memory=Memory(args.state_file), on_player=on_player, relaunch=relaunch)
     ops = Ops(att, args.launcher, args.cache)
     server = Server(args.socket, ops)
     server_ref["s"] = server
