@@ -245,14 +245,27 @@ Item {
 
   property int restartDelayMs: 1000
 
+  // True once our bridge has said it is listening. The socket is only tried
+  // after that: connecting earlier races the bridge's startup, and on
+  // Quickshell < 0.3.2 a Socket whose first connect failed never recovers
+  // (fixed upstream in quickshell 41651d7d, "discard sockets which have
+  // failed to connect"), which left the panel on "Starting the bridge…"
+  // for good (upstream issue #1).
+  property bool bridgeListening: false
+
   Process {
     id: bridgeProc
     command: ["python3", root.pluginDir + "/bin/ytm-bridge"]
     running: true
     stderr: SplitParser {
-      onRead: data => { if (String(data).indexOf("state ") === -1) console.log("[tiertek.ytm] " + data) }
+      onRead: data => {
+        var line = String(data)
+        if (line.indexOf("listening on") !== -1) root.bridgeListening = true
+        if (line.indexOf("state ") === -1) console.log("[tiertek.ytm] " + line)
+      }
     }
     onExited: (code, status) => {
+      root.bridgeListening = false
       // Crash loop guard: 1 s → 30 s.
       restartTimer.interval = root.restartDelayMs
       root.restartDelayMs = Math.min(30000, root.restartDelayMs * 2)
@@ -291,7 +304,7 @@ Item {
     id: reconnect
     interval: 2000
     repeat: true
-    running: !sock.connected
+    running: !sock.connected && root.bridgeListening
     triggeredOnStart: true
     onTriggered: sock.connected = true
   }
