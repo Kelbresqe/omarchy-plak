@@ -74,9 +74,10 @@ Item {
       root.loadHome()
       root.loadVolume()
       root.loadRepeat()
+      root.loadShuffle()
       root.onTrack(root.video)
     }
-    if (root.app !== "ready") { root.volume = -1; root.repeatMode = "" }
+    if (root.app !== "ready") { root.volume = -1; root.repeatMode = ""; root.shuffleState = -1 }
     if (root.video !== wasVideo) root.onTrack(root.video)
   }
 
@@ -164,8 +165,29 @@ Item {
     })
   }
 
+  // Shuffle: a toggle on the page's player bar (Chromium's MPRIS player has
+  // no Shuffle). -1 unknown, 0 off, 1 on.
+  property int shuffleState: -1
+  readonly property bool shuffleSupported: root.ready && root.shuffleState >= 0
+  readonly property bool shuffleOn: root.shuffleState === 1
+
+  function applyShuffle(m) {
+    if (m.ok && m.data && typeof m.data.on === "boolean") { root.shuffleState = m.data.on ? 1 : 0; return true }
+    return false
+  }
+  function loadShuffle() { root.request("shuffle.get", null, root.applyShuffle) }
+  function toggleShuffle() {
+    if (!root.shuffleSupported) return
+    var next = !root.shuffleOn
+    root.shuffleState = next ? 1 : 0                    // optimistic
+    root.request("shuffle.set", { on: next }, function(m) {
+      if (!root.applyShuffle(m)) root.loadShuffle()
+      queueRefresh.restart()                            // the up-next order changed
+    })
+  }
+
   // Pick up a change made in the YouTube Music window itself.
-  onPanelOpenChanged: if (root.panelOpen && root.ready) { root.loadVolume(); root.loadRepeat() }
+  onPanelOpenChanged: if (root.panelOpen && root.ready) { root.loadVolume(); root.loadRepeat(); root.loadShuffle() }
 
   // ---------------------------------------------------------------- bridge process
 
@@ -323,7 +345,8 @@ Item {
     if (!videoId || !root.ready) return
     queueRefresh.restart()
     root.refreshLiked()
-    root.loadRepeat()      // a `play` reloads the page, which may reset it
+    root.loadRepeat()      // a `play` reloads the page, which may reset these
+    root.loadShuffle()
     root.trackChanged(videoId)
   }
 

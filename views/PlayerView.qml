@@ -262,7 +262,7 @@ Item {
       Text {
         width: parent.width
         textFormat: Text.PlainText
-        text: "Space play/pause  ·  , . prev/next  ·  f like  ·  r radio  ·  Tab views"
+        text: "Space\u00a0play/pause  ·  ,\u00a0.\u00a0prev/next  ·  f\u00a0like  ·  r\u00a0radio  ·  t\u00a0repeat  ·  x\u00a0shuffle  ·  Tab\u00a0views"
         color: Color.foreground
         opacity: 0.35
         font.family: root.family

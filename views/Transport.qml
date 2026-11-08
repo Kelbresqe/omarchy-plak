@@ -120,11 +120,20 @@ Column {
       }
     }
 
-    // Right: repeat, volume, show window.
+    // Right: shuffle, repeat, volume, show window.
     Row {
       anchors.right: parent.right
       anchors.verticalCenter: parent.verticalCenter
       spacing: Style.space(6)
+      PanelActionButton {
+        readonly property bool on: root.svc ? root.svc.shuffleOn : false
+        iconText: "\u{F049D}"
+        foreground: on ? Color.accent : Color.foreground
+        tooltipText: on ? "Shuffle: on (x)" : "Shuffle: off (x)"
+        fontFamily: root.family
+        visible: root.svc && root.svc.shuffleSupported
+        onClicked: root.svc.toggleShuffle()
+      }
       PanelActionButton {
         readonly property string mode: root.svc ? root.svc.repeatMode : ""
         iconText: mode === "ONE" ? "\u{F0458}" : mode === "ALL" ? "\u{F0456}" : "\u{F0457}"

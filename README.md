@@ -111,6 +111,7 @@ your way. Bring it back with the ↗ button in the panel, `Super+Shift+M`
 | `,` `.` | previous / next track |
 | `f` `d` `r` | like · dislike · start radio from the current song |
 | `t` | repeat: off → all → this song → off |
+| `x` | shuffle on / off |
 | `a` `s` | inside a playlist: play all · shuffle |
 | `g` | queue / lyrics: jump back to the current line |
 | `R` | Home: refresh the rows |

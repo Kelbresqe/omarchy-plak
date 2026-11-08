@@ -629,6 +629,15 @@ class Ops:
             raise BadRequest("mode")
         return {"data": self._page("repeat.set", {"mode": mode})}
 
+    def op_shuffle_get(self, arg):
+        return {"data": self._page("shuffle.get", {})}
+
+    def op_shuffle_set(self, arg):
+        on = arg.get("on")
+        if not isinstance(on, bool):
+            raise BadRequest("on")
+        return {"data": self._page("shuffle.set", {"on": on})}
+
     def op_art(self, arg):
         """Download an artwork URL into the cache and return its path, for
         notify-send, which needs a file. Only https://*.googleusercontent.com

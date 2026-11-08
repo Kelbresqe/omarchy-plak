@@ -70,6 +70,7 @@ Panel {
     if (t === "d") { if (root.svc) root.svc.dislike(); return }
     if (t === "r") { if (root.svc && root.svc.video) root.svc.radio(root.svc.video); return }
     if (t === "t") { if (root.svc) root.svc.cycleRepeat(); return }
+    if (t === "x") { if (root.svc) root.svc.toggleShuffle(); return }
     if (t === ",") { if (root.svc) root.svc.previous(); return }
     if (t === ".") { if (root.svc) root.svc.next(); return }
     if (root.activeView && root.activeView.textKey) root.activeView.textKey(t)

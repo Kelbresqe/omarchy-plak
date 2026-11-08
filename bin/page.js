@@ -119,6 +119,19 @@
     return bar ? bar.querySelector(".right-controls-buttons .repeat") || bar.querySelector(".repeat") : null
   }
 
+  // Shuffle is a toggle on current YouTube Music: the player bar's boolean
+  // `shuffleOn` flips with each click of its shuffle button (turning it off
+  // keeps the shuffled order). The button has no aria-pressed. Chromium's
+  // MPRIS player has no Shuffle property.
+  function shuffleOn() {
+    const bar = playerBar()
+    return bar && typeof bar.shuffleOn === "boolean" ? bar.shuffleOn : null
+  }
+  function shuffleButton() {
+    const bar = playerBar()
+    return bar ? bar.querySelector(".right-controls-buttons .shuffle") || bar.querySelector(".shuffle") : null
+  }
+
   // Polymer elements expose their renderer JSON as `.data`; the queue items
   // carry the same playlistPanelVideoRenderer shape the `next` endpoint uses,
   // so the parser in Ytm.js handles both without knowing which one it got.
@@ -215,11 +228,15 @@
 
     // Click the player bar's shuffle button unless it is already on. Used by
     // the bridge after a `play` with shuffle:true, once the page is back.
+    // Shuffle is a toggle, so check `shuffleOn` first: clicking while it is
+    // already on would turn it off. aria-pressed is only a fallback for a bar
+    // without the property.
     async "player.shuffle"() {
-      const bar = playerBar()
-      const btn = bar && bar.querySelector("tp-yt-paper-icon-button.shuffle, .shuffle")
+      const on = shuffleOn()
+      if (on === true) return { shuffled: true }
+      const btn = shuffleButton()
       if (!btn) return { shuffled: false }
-      if (btn.getAttribute("aria-pressed") === "true") return { shuffled: true }
+      if (on === null && btn.getAttribute("aria-pressed") === "true") return { shuffled: true }
       btn.click()
       return { shuffled: true }
     },
@@ -307,6 +324,22 @@
         for (let t = 0; t < 20 && repeatMode() === now; t++) await new Promise(r => setTimeout(r, 25))
       }
       return { mode: repeatMode() }
+    },
+
+    // `on` is null while the bar is not up.
+    async "shuffle.get"() {
+      return { on: shuffleOn() }
+    },
+
+    // Click only if the state differs from `arg.on`, then wait for the flip.
+    async "shuffle.set"(arg) {
+      const now = shuffleOn()
+      if (now === null || now === arg.on) return { on: now }
+      const btn = shuffleButton()
+      if (!btn) return { on: now }
+      btn.click()
+      for (let t = 0; t < 40 && shuffleOn() === now; t++) await new Promise(r => setTimeout(r, 25))
+      return { on: shuffleOn() }
     },
   }
 
