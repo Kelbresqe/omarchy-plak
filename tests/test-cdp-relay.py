@@ -45,7 +45,7 @@ class Conn:
 class RelayTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
-        self.path = os.path.join(self.tmp, "cdp.sock")
+        self.path = os.path.join(self.tmp, "run", "cdp.sock")     # the relay makes run/
         self.log = os.path.join(self.tmp, "log")
         self.env = dict(os.environ, FAKE_LOG=self.log)
         self.proc = self.launch()
@@ -77,6 +77,7 @@ class RelayTest(unittest.TestCase):
 
     def test_socket_is_private_and_relays(self):
         self.assertEqual(oct(os.stat(self.path).st_mode & 0o777), "0o600")
+        self.assertEqual(oct(os.stat(os.path.dirname(self.path)).st_mode & 0o777), "0o700")
         self.assertEqual(self.entries("argv"), [["--x", "--remote-debugging-pipe"]])
         c = Conn(self.path)
         c.send(7, "Browser.getVersion")

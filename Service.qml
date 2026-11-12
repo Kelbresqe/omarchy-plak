@@ -33,8 +33,10 @@ Item {
     var p = decodeURIComponent(Qt.resolvedUrl(".").toString().replace(/^file:\/\//, ""))
     return p.replace(/\/$/, "")
   }
-  readonly property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR") || "/tmp"
-  readonly property string socketPath: runtimeDir + "/io.github.kelbresqe.plak.sock"
+  // No fallback to /tmp: a shared directory lets another user take the path.
+  // Without XDG_RUNTIME_DIR the bridge refuses to start.
+  readonly property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR") || ""
+  readonly property string socketPath: runtimeDir ? runtimeDir + "/io.github.kelbresqe.plak.sock" : ""
 
   // ---------------------------------------------------------------- state
 
@@ -558,8 +560,9 @@ Item {
   // ---------------------------------------------------------------- toast
 
   // One replaceable notification per track change while playing. Chromium
-  // hands MPRIS the artwork as a local file, so it goes straight to
-  // notify-send; an https URL is fetched into the cache by the bridge.
+  // hands MPRIS the artwork as a local file, used as the icon. The track goes
+  // to bin/ytm-notify on stdin, never in argv: another local user can read
+  // any process's command line in /proc.
   Timer {
     id: toastDelay
     interval: 1200          // let MPRIS metadata catch up with the page
@@ -571,21 +574,21 @@ Item {
   function toastNow() {
     if (!root.setting("toast", true) || root.panelOpen || !root.isPlaying || !root.title) return
     var art = root.artUrl
-    if (art.indexOf("file://") === 0) root.sendToast(decodeURIComponent(art.slice(7)))
-    else if (art.indexOf("https://") === 0) root.request("art", { url: art }, function(m) { root.sendToast(m.ok ? m.path : "") })
-    else root.sendToast("")
-  }
-
-  function sendToast(iconPath) {
     if (toastProc.running) return
-    var cmd = ["notify-send", "--app-name=Plak",
-               "--hint=string:x-canonical-private-synchronous:io.github.kelbresqe.plak", "--expire-time=4000"]
-    if (iconPath) cmd.push("--icon=" + iconPath)
-    cmd.push(root.title, root.artist + (root.album && root.album !== root.title ? "  ·  " + root.album : ""))
-    toastProc.command = cmd
+    toastProc.payload = JSON.stringify({   // one line: JSON escapes newlines
+      title: root.title,
+      body: root.artist + (root.album && root.album !== root.title ? "  ·  " + root.album : ""),
+      icon: art.indexOf("file://") === 0 ? decodeURIComponent(art.slice(7)) : ""
+    })
     toastProc.running = true
   }
-  Process { id: toastProc }
+  Process {
+    id: toastProc
+    property string payload: ""
+    command: ["python3", root.pluginDir + "/bin/ytm-notify"]
+    stdinEnabled: true
+    onStarted: { write(payload + "\n"); payload = "" }
+  }
 
   // ---------------------------------------------------------------- sleep timer
 

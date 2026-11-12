@@ -14,7 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 BRIDGE = os.path.join(ROOT, "bin", "ytm-bridge")
 sys.path.insert(0, HERE)
-from fakecdp import FakeBrowser  # noqa: E402
+from fakecdp import FakeBrowser, Seq  # noqa: E402
 
 bridge = importlib.machinery.SourceFileLoader("ytm_bridge", BRIDGE).load_module()
 
@@ -80,7 +80,8 @@ class Base(unittest.TestCase):
         self.browser = FakeBrowser(self.profile)
         env = dict(os.environ, YTM_POLL_MS="100", YTM_CLOSE_WAIT_S="0.5", XDG_STATE_HOME=os.path.join(self.tmp, "xdg-state"))
         env.update(self.extra_env)
-        self.proc = subprocess.Popen([sys.executable, BRIDGE, "--socket", self.sockpath, "--profile", self.profile,
+        self.proc = subprocess.Popen([sys.executable, BRIDGE, "--socket", self.sockpath, "--devtools", self.browser.path,
+                                      "--profile", self.profile,
                                       "--launcher", self.launcher, "--cache", os.path.join(self.tmp, "cache"),
                                       "--state-file", self.state_file], env=env, stderr=subprocess.PIPE)
         for _ in range(50):
@@ -444,16 +445,30 @@ class OpsTest(Base):
         self.assertEqual(r["data"], {"cached": "yes"})
         self.assertTrue(r["cached"])
 
+    def test_caches_are_private(self):
+        # Playlist names and ids are account-private: no other local user may
+        # read the caches, whatever the umask.
+        c = self.ready()
+        self.browser.canned["library.playlists"] = {"private": "names"}
+        self.browser.canned["home"] = {"pages": [1]}
+        c.call("library.playlists")
+        c.call("home")
+        cache = os.path.join(self.tmp, "cache")
+        self.assertEqual(mode(cache), 0o700)
+        for name in ("library.json", "home.json"):
+            self.assertEqual(mode(os.path.join(cache, name)), 0o600, name)
+
     def test_track_event_on_video_change(self):
         c = self.ready()
         self.browser.canned["state"] = {"loggedIn": True, "video": "dQw4w9WgXcQ"}
         m = c.wait_event("track", timeout=8)
         self.assertEqual(m["video"], "dQw4w9WgXcQ")
 
-    def test_art_only_google_hosts(self):
+    def test_no_art_download(self):
+        # Chromium hands MPRIS the artwork as a local file; the bridge fetches
+        # nothing from the network for it.
         c = self.ready()
-        self.assertEqual(c.call("art", url="https://evil.example/x.jpg")["error"], "bad-request")
-        self.assertEqual(c.call("art", url="http://i.ytimg.com/x.jpg")["error"], "bad-request")
+        self.assertEqual(c.call("art", url="https://i.ytimg.com/vi/x/hq.jpg")["error"], "bad-request")
 
 
 class RawServer:
@@ -579,9 +594,9 @@ class RecoveryTest(RecorderBase):
         c = Client(self.sockpath)
         self.browser.start()
         self.wait_state(c, "ready")
-        self.browser.canned["state"] = RuntimeError("blip")
-        time.sleep(0.15)                                  # one miss, under the limit
-        self.browser.canned["state"] = {"loggedIn": True}
+        # Exactly one miss, under the limit. (A timed window used to decide
+        # how many polls missed, which made this pass or fail by luck.)
+        self.browser.canned["state"] = Seq(RuntimeError("blip"), {"loggedIn": True})
         self.wait_state(c, "ready")                       # polling continues in "attaching"
         time.sleep(0.5)
         self.assertNotIn("Page.reload", self.browser.methods)
@@ -589,6 +604,51 @@ class RecoveryTest(RecorderBase):
 
 VID = "dQw4w9WgXcQ"
 LIST = "PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf"
+
+
+def mode(path):
+    return os.stat(path).st_mode & 0o777
+
+
+class PrivateFilesTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.old_umask = os.umask(0o022)
+
+    def tearDown(self):
+        os.umask(self.old_umask)
+
+    def test_dir_left_open_by_an_older_version_is_closed(self):
+        d = os.path.join(self.tmp, "cache")
+        os.mkdir(d, 0o755)
+        bridge.Ops(None, "/bin/true", d)
+        self.assertEqual(mode(d), 0o700)
+
+    def test_missing_cache_dir_is_not_created_at_start(self):
+        d = os.path.join(self.tmp, "cache")
+        bridge.Ops(None, "/bin/true", d)
+        self.assertFalse(os.path.exists(d))
+
+    def test_stale_tmp_does_not_leak_its_mode(self):
+        p = os.path.join(self.tmp, "library.json")
+        with open(p + ".tmp", "w") as f:
+            f.write("old")
+        os.chmod(p + ".tmp", 0o644)
+        bridge.write_private(p, b"{}")
+        self.assertEqual(mode(p), 0o600)
+        with open(p) as f:
+            self.assertEqual(f.read(), "{}")
+
+    def test_symlinked_tmp_is_refused(self):
+        p = os.path.join(self.tmp, "library.json")
+        target = os.path.join(self.tmp, "elsewhere")
+        with open(target, "w") as f:
+            f.write("keep")
+        os.symlink(target, p + ".tmp")
+        with self.assertRaises(OSError):
+            bridge.write_private(p, b"{}")
+        with open(target) as f:
+            self.assertEqual(f.read(), "keep")
 
 
 class MemoryTest(unittest.TestCase):
@@ -742,6 +802,18 @@ class SelfWatchTest(unittest.TestCase):
         c = Client(self.sockpath)                 # the old one did not unlink it
         self.assertTrue(c.call("state")["ok"])
         c.close()
+
+
+class RuntimeDirTest(unittest.TestCase):
+    def test_refuses_to_start_without_xdg_runtime_dir(self):
+        env = {k: v for k, v in os.environ.items() if k != "XDG_RUNTIME_DIR"}
+        tmp = tempfile.mkdtemp()
+        r = subprocess.run([sys.executable, BRIDGE, "--profile", os.path.join(tmp, "p"), "--cache", os.path.join(tmp, "c"),
+                            "--state-file", os.path.join(tmp, "s.json")],
+                           env=env, capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("XDG_RUNTIME_DIR", r.stderr)
+        self.assertEqual(os.listdir(tmp), [])
 
 
 class CheckIdTest(unittest.TestCase):

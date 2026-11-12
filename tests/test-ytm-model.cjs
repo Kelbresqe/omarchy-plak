@@ -21,11 +21,20 @@ t("splitRuns", () => {
 })
 
 t("pickThumb prefers the smallest >= 120", () => {
-  const th = [{ url: "a", width: 60 }, { url: "b", width: 226 }, { url: "c", width: 544 }]
-  assert.equal(Y.pickThumb(th), "b")
-  assert.equal(Y.pickThumb([{ url: "a", width: 60 }]), "a")
+  const u = (n) => "https://i.ytimg.com/" + n + ".jpg"
+  const th = [{ url: u("a"), width: 60 }, { url: u("b"), width: 226 }, { url: u("c"), width: 544 }]
+  assert.equal(Y.pickThumb(th), u("b"))
+  assert.equal(Y.pickThumb([{ url: u("a"), width: 60 }]), u("a"))
   assert.equal(Y.pickThumb([]), "")
   assert.equal(Y.pickThumb(undefined), "")
+})
+
+t("pickThumb only takes Google's image hosts", () => {
+  const good = "https://lh3.googleusercontent.com/x=w226"
+  assert.equal(Y.pickThumb([{ url: "https://evil.example/t.jpg", width: 226 }, { url: good, width: 544 }]), good)
+  for (const bad of ["https://evil.example/t.jpg", "http://i.ytimg.com/t.jpg", "https://i.ytimg.com.evil.example/t.jpg",
+                     "https://evilytimg.com/t.jpg", "file:///etc/passwd", "javascript:alert(1)"])
+    assert.equal(Y.pickThumb([{ url: bad, width: 226 }]), "", bad)
 })
 
 t("parsePlaylists", () => {

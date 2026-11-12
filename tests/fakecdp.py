@@ -1,6 +1,6 @@
 """A fake Chromium DevTools endpoint for testing bin/ytm-bridge without a browser.
 
-Listens where bin/ytm-cdp would (<profile>/Plak-DevTools.sock) and speaks its
+Listens where bin/ytm-cdp would (the bridge's --devtools path) and speaks its
 framing, NUL-terminated JSON, plus just enough CDP: Target.getTargets,
 Target.attachToTarget (flatten), Runtime.enable/evaluate,
 Runtime.callFunctionOn (answered from `canned` keyed by the op in
@@ -14,10 +14,20 @@ import socket
 import threading
 
 
+class Seq:
+    """Canned answers handed out in turn; the last one repeats."""
+
+    def __init__(self, *values):
+        self.values = list(values)
+
+    def next(self):
+        return self.values.pop(0) if len(self.values) > 1 else self.values[0]
+
+
 class FakeBrowser:
     def __init__(self, profile_dir):
         self.profile_dir = profile_dir
-        self.path = os.path.join(profile_dir, "Plak-DevTools.sock")
+        self.path = os.path.join(profile_dir, "devtools.sock")
         self.targets = [{"targetId": "T1", "type": "page", "url": "https://music.youtube.com/", "title": "YouTube Music"}]
         self.canned = {"state": {"loggedIn": True}}
         self.calls = []          # every Runtime.callFunctionOn params, in order
@@ -126,6 +136,8 @@ class FakeBrowser:
             args = params.get("arguments", [])
             op = args[0].get("value") if args else None
             value = self.canned.get(op)
+            if isinstance(value, Seq):
+                value = value.next()
             if isinstance(value, Exception):
                 result = {"result": {"type": "object"}, "exceptionDetails": {"text": str(value)}}
             else:

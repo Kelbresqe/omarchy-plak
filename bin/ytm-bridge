@@ -3,12 +3,12 @@
 
 Attaches to the Chromium app window that bin/ytm-app launched (through
 bin/ytm-cdp, which holds the browser's DevTools pipe and relays it on a 0600
-socket in the dedicated profile), and serves a JSON-lines protocol on a
-private unix socket. Every authenticated request is
+socket in $XDG_RUNTIME_DIR/io.github.kelbresqe.plak/), and serves a
+JSON-lines protocol on a private unix socket. Every authenticated request is
 executed *inside the page* by the site's own session; this process never sees
 a cookie or a token, only the JSON that comes back.
 
-    ytm-bridge [--socket PATH] [--profile DIR] [--launcher PATH]   daemon
+    ytm-bridge [--socket PATH] [--devtools PATH] [--profile DIR] [--launcher PATH]   daemon
     ytm-bridge --once OP [JSON]                                    one request, print, exit
                                                                    (only while no daemon is attached:
                                                                    the relay takes one client at a time)
@@ -27,15 +27,13 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.request
 
 # Ids that may appear in a URL or be handed to the page. Same grammar as
 # Ytm.isValidId in Ytm.js; tests/test-id-grammar.sh keeps them identical.
 VALID_ID = re.compile(r"^[A-Za-z0-9_-]{2,64}$")
 MAX_QUERY = 200
 PAGE_URL_PREFIX = "https://music.youtube.com"
-# bin/ytm-cdp's socket, inside the profile directory (see bin/ytm-app).
-RELAY_NAME = "Plak-DevTools.sock"
+APP_ID = "io.github.kelbresqe.plak"
 
 # Everything read from the browser endpoint is bounded, because what comes
 # back is shaped by the remote page. Measured on a live account 2026-09-20:
@@ -71,6 +69,24 @@ def log(*parts):
 
 def xdg(var, default):
     return os.environ.get(var) or os.path.expanduser(default)
+
+
+# Caches and state hold account-private data (playlist names and ids, what
+# was played), so they are never left to the umask: directories 0700, files
+# 0600. chmod as well as mkdir, because older versions created them 0755.
+def private_dir(path):
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    os.chmod(path, 0o700)
+
+
+def write_private(path, data):
+    """Atomically replace path with bytes, readable by this user only."""
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        os.fchmod(f.fileno(), 0o600)      # a stale .tmp keeps its old mode through O_CREAT
+        f.write(data)
+    os.replace(tmp, path)
 
 
 # ---------------------------------------------------------------- relay socket
@@ -273,12 +289,8 @@ class Memory:
 
     def _write(self, data):
         try:
-            os.makedirs(os.path.dirname(self.path), mode=0o700, exist_ok=True)
-            tmp = self.path + ".tmp"
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(data, f)
-            os.replace(tmp, self.path)
+            private_dir(os.path.dirname(self.path))
+            write_private(self.path, json.dumps(data).encode())
             self._written_at = time.time()
         except OSError as e:
             log("memory write failed", e)
@@ -291,9 +303,10 @@ class Attacher:
     browser does. State is one of no-app / signing-in / attaching /
     signed-out / ready."""
 
-    def __init__(self, profile, on_state, on_track=None, signin_marker=None, memory=None, on_player=None,
-                 relaunch=None):
+    def __init__(self, profile, devtools, on_state, on_track=None, signin_marker=None, memory=None,
+                 on_player=None, relaunch=None):
         self.profile = profile
+        self.devtools = devtools       # bin/ytm-cdp's socket
         self.signin_marker = signin_marker
         self.memory = memory
         self.on_player = on_player or (lambda: None)
@@ -401,7 +414,7 @@ class Attacher:
 
     def _try_attach(self):
         try:
-            cdp = Cdp(os.path.join(self.profile, RELAY_NAME))
+            cdp = Cdp(self.devtools)
         except OSError:
             # No relay (the app window is not running), or a stale socket
             # left by one that was killed.
@@ -673,6 +686,11 @@ class Ops:
         self.att = attacher
         self.launcher = launcher
         self.cache_dir = cache_dir
+        try:
+            if os.path.isdir(cache_dir):
+                private_dir(cache_dir)    # close up a cache an older version left 0755
+        except OSError as e:
+            log("cache dir", e)
         self.launch_lock = threading.Lock()
         self.last_launch = 0.0
 
@@ -945,28 +963,6 @@ class Ops:
             raise BadRequest("on")
         return {"data": self._page("shuffle.set", {"on": on})}
 
-    def op_art(self, arg):
-        """Download an artwork URL into the cache and return its path, for
-        notify-send, which needs a file. Only https://*.googleusercontent.com
-        and https://*.ytimg.com are fetched."""
-        url = arg.get("url")
-        if not isinstance(url, str) or not re.match(
-                r"^https://([a-z0-9-]+\.)*(googleusercontent\.com|ytimg\.com|ggpht\.com|gstatic\.com)/[^\s]{1,1024}$", url):
-            raise BadRequest("url")
-        os.makedirs(self.cache_dir, exist_ok=True)
-        import hashlib
-        path = os.path.join(self.cache_dir, "art-" + hashlib.sha1(url.encode()).hexdigest()[:16] + ".jpg")
-        if not os.path.exists(path):
-            try:
-                with urllib.request.urlopen(url, timeout=10) as r:
-                    data = r.read(2 * 1024 * 1024)
-                with open(path + ".tmp", "wb") as f:
-                    f.write(data)
-                os.replace(path + ".tmp", path)
-            except (OSError, ValueError) as e:
-                raise BadRequest("fetch: %s" % e)
-        return {"path": path}
-
     # -- cache -----------------------------------------------------------
     def _read_cache(self, name):
         try:
@@ -977,13 +973,11 @@ class Ops:
 
     def _write_cache(self, name, data):
         try:
-            os.makedirs(self.cache_dir, exist_ok=True)
-            blob = json.dumps(data)
+            blob = json.dumps(data).encode()
             if len(blob) > 1024 * 1024:
                 return
-            with open(os.path.join(self.cache_dir, name + ".tmp"), "w", encoding="utf-8") as f:
-                f.write(blob)
-            os.replace(os.path.join(self.cache_dir, name + ".tmp"), os.path.join(self.cache_dir, name))
+            private_dir(self.cache_dir)
+            write_private(os.path.join(self.cache_dir, name), blob)
         except OSError:
             pass
 
@@ -1157,7 +1151,8 @@ class Server:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--socket", default=os.path.join(xdg("XDG_RUNTIME_DIR", "/tmp"), "io.github.kelbresqe.plak.sock"))
+    ap.add_argument("--socket")
+    ap.add_argument("--devtools")
     ap.add_argument("--profile", default=os.path.join(xdg("XDG_DATA_HOME", "~/.local/share"), "io.github.kelbresqe.plak", "profile"))
     ap.add_argument("--cache", default=os.path.join(xdg("XDG_CACHE_HOME", "~/.cache"), "io.github.kelbresqe.plak"))
     ap.add_argument("--state-file", default=os.path.join(xdg("XDG_STATE_HOME", "~/.local/state"), "io.github.kelbresqe.plak", "session.json"))
@@ -1169,8 +1164,17 @@ def main():
     if args.check_id is not None:
         sys.exit(0 if VALID_ID.match(args.check_id) else 1)
 
+    # Sockets live in $XDG_RUNTIME_DIR (0700, this user's only). There is no
+    # /tmp fallback: in a shared directory another user could take the path.
+    if not args.socket or not args.devtools:
+        run = os.environ.get("XDG_RUNTIME_DIR")
+        if not run:
+            sys.exit("ytm-bridge: XDG_RUNTIME_DIR is not set; refusing to put sockets in a shared directory")
+        args.socket = args.socket or os.path.join(run, APP_ID + ".sock")
+        args.devtools = args.devtools or os.path.join(run, APP_ID, "devtools.sock")
+
     if args.once:
-        att = Attacher(args.profile, lambda s: None)
+        att = Attacher(args.profile, args.devtools, lambda s: None)
         ops = Ops(att, args.launcher, args.cache)
         deadline = time.time() + 15
         while att.state in ("no-app", "attaching") and time.time() < deadline:
@@ -1209,7 +1213,7 @@ def main():
         except OSError as e:
             log("relaunch failed", e)
 
-    att = Attacher(args.profile, on_state, on_track, signin_marker=args.socket + ".signin",
+    att = Attacher(args.profile, args.devtools, on_state, on_track, signin_marker=args.socket + ".signin",
                    memory=Memory(args.state_file), on_player=on_player, relaunch=relaunch)
     ops = Ops(att, args.launcher, args.cache)
     server = Server(args.socket, ops)

@@ -75,7 +75,9 @@ YouTube changes its stream formats: playback is the real player.
   Edge. Firefox cannot be driven this way. Your default browser is used if it
   qualifies; otherwise the first one found. Set `browser` in the widget
   settings to pick one explicitly.
-- Python 3 (standard library only — present on every Omarchy install).
+- Python 3 and PyGObject (`python-gobject`), both part of every Omarchy
+  install. The bridge and the DevTools relay use the standard library only;
+  PyGObject sends the track notification over D-Bus.
 - Optional: [`cava`](https://github.com/karlstav/cava) for the spectrum bars.
 
 ## Install
@@ -243,8 +245,12 @@ Where things live:
 | | |
 |---|---|
 | browser profile (your session) | `~/.local/share/io.github.kelbresqe.plak/profile/` |
-| cache (library snapshot, notification artwork) | `~/.cache/io.github.kelbresqe.plak/` |
-| socket | `$XDG_RUNTIME_DIR/io.github.kelbresqe.plak.sock` (mode 0600) |
+| resume point, repeat / shuffle | `~/.local/state/io.github.kelbresqe.plak/` |
+| cache (library and home snapshot) | `~/.cache/io.github.kelbresqe.plak/` |
+| sockets | `$XDG_RUNTIME_DIR/io.github.kelbresqe.plak.sock` and `$XDG_RUNTIME_DIR/io.github.kelbresqe.plak/` |
+
+Directories are 0700 and files 0600: they hold your playlist names and what
+you played, and no other user on the machine can read them.
 
 ## Troubleshooting
 
@@ -279,7 +285,7 @@ This removes the plugin and stops the bridge. Your sign-in profile is left in
 place so reinstalling does not ask you to log in again; to remove it too:
 
 ```sh
-rm -rf ~/.local/share/io.github.kelbresqe.plak ~/.cache/io.github.kelbresqe.plak
+rm -rf ~/.local/share/io.github.kelbresqe.plak ~/.local/state/io.github.kelbresqe.plak ~/.cache/io.github.kelbresqe.plak
 ```
 
 If you appended `hypr/ytm.lua` to your bindings, delete the block between

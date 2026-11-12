@@ -84,5 +84,11 @@ https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fmusic.youtube.co
 echo "$out" | grep -q -- '--remote-debugging' && bad "signin has debug port" || ok
 [ -e "$tmp/marker" ] && bad "--print wrote the marker" || ok
 
+# 11. a real launch refuses to run without XDG_RUNTIME_DIR (no /tmp fallback)
+reset; stub chromium; xdg chromium.desktop
+PATH="$fake:$tools" XDG_RUNTIME_DIR= /usr/bin/bash "$APP" 2>"$tmp/err"; rc=$?
+[ $rc -eq 5 ] && ok || bad "no XDG_RUNTIME_DIR: rc=$rc"
+grep -q 'XDG_RUNTIME_DIR' "$tmp/err" && ok || bad "no XDG_RUNTIME_DIR: no hint in stderr"
+
 echo "test-app-launch: $pass passed, $fail failed"
 [ $fail -eq 0 ]

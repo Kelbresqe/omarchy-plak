@@ -58,18 +58,24 @@ function splitRuns(obj) {
   return parts
 }
 
-// Smallest thumbnail that is at least `min` px wide, else the largest.
+// The shell loads thumbnails itself, so a URL from page data is only used
+// when it points at Google's image hosts; anything else would make the
+// shell fetch from wherever the data says.
+var THUMB_HOST = /^https:\/\/([a-z0-9-]+\.)*(googleusercontent\.com|ytimg\.com|ggpht\.com|gstatic\.com)\//
+
+// Smallest allowed thumbnail that is at least `min` px wide, else the largest.
 function pickThumb(thumbnails, min) {
-  if (!Array.isArray(thumbnails) || thumbnails.length === 0) return ""
+  if (!Array.isArray(thumbnails)) return ""
   min = min || 120
+  var ok = thumbnails.filter(function(t) { return t && THUMB_HOST.test(String(t.url || "")) })
+  if (ok.length === 0) return ""
   var best = null
-  for (var i = 0; i < thumbnails.length; i++) {
-    var t = thumbnails[i]
-    if (!t || !t.url) continue
+  for (var i = 0; i < ok.length; i++) {
+    var t = ok[i]
     if ((t.width || 0) >= min && (!best || (t.width || 0) < (best.width || 0))) best = t
   }
-  if (!best) best = thumbnails[thumbnails.length - 1]
-  return best && best.url ? String(best.url) : ""
+  if (!best) best = ok[ok.length - 1]
+  return String(best.url)
 }
 
 function thumbOf(renderer) {

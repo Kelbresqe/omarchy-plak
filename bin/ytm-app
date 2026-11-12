@@ -4,9 +4,10 @@
 # A dedicated profile keeps the user's real browser profile out of reach of
 # DevTools (and Chrome >= 136 refuses to debug the default profile anyway).
 # DevTools runs over a pipe, not a port: bin/ytm-cdp starts the browser with
-# --remote-debugging-pipe and relays it on <profile>/Plak-DevTools.sock (0600,
-# in the 0700 profile), which is where the bridge connects. A TCP debug port
-# would let any local user attach to the signed-in profile.
+# --remote-debugging-pipe and relays it on
+# $XDG_RUNTIME_DIR/io.github.kelbresqe.plak/devtools.sock (0600, in a 0700
+# directory), which is where the bridge connects. A TCP debug port would let
+# any local user attach to the signed-in profile.
 #
 #   ytm-app [--browser NAME] [--print] [--signin [--marker FILE]]
 #     --print   show the browser's argv instead of launching (tests)
@@ -157,7 +158,12 @@ if [ "$print" -eq 1 ]; then
   exit 0
 fi
 
-relay=("$(dirname "$(readlink -f "$0")")/ytm-cdp" "$profile/Plak-DevTools.sock")
+# No /tmp fallback: in a shared directory another user could take the path.
+if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+  echo "ytm-app: XDG_RUNTIME_DIR is not set; refusing to put the DevTools socket in a shared directory" >&2
+  exit 5
+fi
+relay=("$(dirname "$(readlink -f "$0")")/ytm-cdp" "$XDG_RUNTIME_DIR/io.github.kelbresqe.plak/devtools.sock")
 if command -v uwsm-app >/dev/null 2>&1; then
   exec setsid uwsm-app -- "${relay[@]}" "${argv[@]}" >/dev/null 2>&1
 else

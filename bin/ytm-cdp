@@ -9,7 +9,8 @@ network, could attach and read the whole profile, Google sign-in included.
 that started it on fds 3 (commands in) and 4 (replies and events out), as
 NUL-terminated JSON, and quits when that end closes. So this process starts
 the browser, lives exactly as long as it does, and relays the pipe on SOCKET:
-mode 0600, inside the 0700 profile directory. Same framing on both sides.
+mode 0600, in a directory it makes 0700 (bin/ytm-app puts it under
+$XDG_RUNTIME_DIR). Same framing on both sides.
 
     ytm-cdp SOCKET BROWSER [ARGS...]      ARGS include --remote-debugging-pipe
 
@@ -130,7 +131,7 @@ class Relay:
                 try:
                     self._route(raw)
                 except Exception as e:    # one bad message must not deafen the relay
-                    log("message dropped:", repr(e))
+                    log("message dropped:", type(e).__name__)   # never the payload: it is page data
             if split.dropped:
                 log("dropped", split.dropped, "oversized message(s) from the browser")
                 split.dropped = 0
@@ -230,6 +231,9 @@ class Relay:
 
 def listen(path):
     """The listening socket on path, or None if a live relay already has it."""
+    parent = os.path.dirname(path)
+    os.makedirs(parent, mode=0o700, exist_ok=True)
+    os.chmod(parent, 0o700)
     for attempt in (1, 2):
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         old = os.umask(0o177)
@@ -262,8 +266,6 @@ def main():
         sys.stderr.write("usage: ytm-cdp SOCKET BROWSER [ARGS...]\n")
         sys.exit(2)
     path, argv = sys.argv[1], sys.argv[2:]
-    # shortcut: AF_UNIX paths stop at 107 bytes, so a profile path over ~85
-    # bytes cannot hold the socket; move it under $XDG_RUNTIME_DIR if anyone hits that.
     srv = listen(path)
     if srv is None:
         os.execvp(argv[0], [a for a in argv if a != PIPE_FLAG])

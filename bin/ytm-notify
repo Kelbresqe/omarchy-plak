@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""ytm-notify: show Plak's track toast.
+
+Reads {"title", "body", "icon"} as one JSON line on stdin (the way Omarchy's
+own network panel hands nmcli a password) and sends one Notify call to
+org.freedesktop.Notifications. The track never goes on a command line, where
+any local user could read it in /proc/<pid>/cmdline (notify-send would put it
+there). The toast replaces the previous one and is transient, so it stays out
+of the notification history.
+
+Uses PyGObject (python-gobject), which is part of Omarchy's base install.
+"""
+import json
+import sys
+
+from gi.repository import Gio, GLib
+
+APP = "io.github.kelbresqe.plak"
+
+
+def escape(text):
+    # The body may be read as markup (Omarchy's server supports it); titles
+    # are written by uploaders and must show as text.
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def parse(raw):
+    m = json.loads(raw)
+    if not isinstance(m, dict):
+        raise ValueError("not an object")
+
+    def text(key, cap):
+        v = m.get(key)
+        return v[:cap] if isinstance(v, str) else ""
+
+    title = text("title", 300)
+    if not title:
+        raise ValueError("no title")
+    icon = text("icon", 4096)
+    if icon and not icon.startswith("/"):
+        icon = ""                 # only a local file Chromium wrote
+    return title, escape(text("body", 600)), icon
+
+
+def main():
+    try:
+        title, body, icon = parse(sys.stdin.readline(64 * 1024))
+    except ValueError as e:
+        sys.stderr.write("ytm-notify: %s\n" % e)
+        sys.exit(2)
+    hints = {
+        "x-canonical-private-synchronous": GLib.Variant("s", APP),
+        "transient": GLib.Variant("b", True),
+    }
+    bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    bus.call_sync("org.freedesktop.Notifications", "/org/freedesktop/Notifications",
+                  "org.freedesktop.Notifications", "Notify",
+                  GLib.Variant("(susssasa{sv}i)", ("Plak", 0, icon, title, body, [], hints, 4000)),
+                  None, Gio.DBusCallFlags.NONE, 5000, None)
+
+
+if __name__ == "__main__":
+    main()
